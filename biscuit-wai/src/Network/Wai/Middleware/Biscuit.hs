@@ -38,41 +38,42 @@ import           Network.Wai        (Middleware, Request (..), Response,
                                      responseLBS)
 
 -- | Key where the verified biscuit is stored in the request context. The
--- `Vault` module is designed to make keys opaque and unique, hence the use of
--- `IO` for key generation. Here we don’t care about unicity, we want the token
--- to be easily accessible. Hence the call to `unsafePerformIO`.
+-- 'Vault' module is designed to make keys opaque and unique, hence the use of
+-- 'IO' for key generation. Here we don’t care about unicity, we want the token
+-- to be easily accessible. Hence the call to 'unsafePerformIO'.
 {-# NOINLINE  biscuitKey #-}
 biscuitKey :: Vault.Key (Biscuit OpenOrSealed Verified)
 biscuitKey = unsafePerformIO Vault.newKey
 
 -- | Key where the authorized biscuit is stored in the request context. The
--- `Vault` module is designed to make keys opaque and unique, hence the use of
--- `IO` for key generation. Here we don’t care about unicity, we want the token
--- to be easily accessible. Hence the call to `unsafePerformIO`.
+-- 'Vault' module is designed to make keys opaque and unique, hence the use of
+-- 'IO' for key generation. Here we don’t care about unicity, we want the token
+-- to be easily accessible. Hence the call to 'unsafePerformIO'.
 {-# NOINLINE  authorizedBiscuitKey #-}
 authorizedBiscuitKey :: Vault.Key (AuthorizedBiscuit OpenOrSealed)
 authorizedBiscuitKey = unsafePerformIO Vault.newKey
 
 -- | Retrieve the parsed token from the request context. It is meant to be used
--- in conjunction with the `parseBiscuit` (or `parseBiscuitWith`) middleware.
--- It will not be set by the `authorizeBiscuit'` (or `authorizeBiscuitWith`)
+-- in conjunction with the 'parseBiscuit' (or 'parseBiscuitWith') middleware.
+-- It will not be set by the 'authorizeBiscuit'' (or 'authorizeBiscuitWith')
 -- middleware.
 getBiscuit :: Request -> Maybe (Biscuit OpenOrSealed Verified)
 getBiscuit = Vault.lookup biscuitKey . vault
 
 -- | Retrieve the result of the successful authorization from the request
--- context. It is meant to be used in conjunction with the `authorizeBiscuit'`
--- (or the `authorizeBiscuitWith`) middleware.
+-- context. It is meant to be used in conjunction with the 'authorizeBiscuit''
+-- (or the 'authorizeBiscuitWith') middleware.
 getAuthorizedBiscuit :: Request -> Maybe (AuthorizedBiscuit OpenOrSealed)
 getAuthorizedBiscuit = Vault.lookup authorizedBiscuitKey . vault
 
 -- | Given a public key, generate a middleware that will extract a biscuit
 -- token from incoming requests, parse it, and verify its signature. Requests
 -- without a verified biscuit are rejected, and the verified biscuit is added
--- to the request context. __The token is not authorized, only parsed and has
--- its signature verified.__ Authorization is meant to be carried out in the
--- application itself. If you want to carry out authorization in the middleware,
--- have a look at `authorizeBiscuit'` (or `authorizeBiscuitWith`).
+-- to the request context.
+-- __The token is not authorized, only parsed and has its signature verified__.
+-- Authorization is meant to be carried out in the application itself. If you
+-- want to carry out authorization in the middleware, have a look at
+-- 'authorizeBiscuit'' (or 'authorizeBiscuitWith').
 --
 -- The token is expected as a base64-encoded string, provided as a bearer token
 -- in the @Authorization@ header. A missing header results in a bodyless 401
@@ -80,7 +81,7 @@ getAuthorizedBiscuit = Vault.lookup authorizedBiscuitKey . vault
 -- Errors are logged to stdout.
 --
 -- If you need custom extraction, parsing or error handling, have a look at
--- `parseBiscuitWith`.
+-- 'parseBiscuitWith'.
 parseBiscuit :: PublicKey -> Middleware
 parseBiscuit = parseBiscuitWith . defaultExtractionConfig
 
@@ -88,13 +89,14 @@ parseBiscuit = parseBiscuitWith . defaultExtractionConfig
 -- generate a middleware that will extract a biscuit token from incoming
 -- requests, parse it, and verify its signature. Requests without a verified
 -- biscuit are rejected, and the verified biscuit is added to the request
--- context. __The token is not authorized, only parsed and has its signature
--- verified. __Authorization is meant to be carried out in the application
--- itself. If you want to carry out authorization in the middleware, have a
--- look at `authorizeBiscuit'` (or `authorizeBiscuitWith`).
+-- context.
+-- __The token is not authorized, only parsed and has its signature verified__.
+-- Authorization is meant to be carried out in the application itself. If you
+-- want to carry out authorization in the middleware, have a look at
+-- 'authorizeBiscuit'' (or 'authorizeBiscuitWith').
 --
 -- If you don’t need custom extraction, parsing or error handling logic, have a
--- look at `parseBiscuit`.
+-- look at 'parseBiscuit'.
 parseBiscuitWith :: ExtractionConfig e -> Middleware
 parseBiscuitWith config app req sendResponse = do
   let ExtractionConfig{extractToken,parseToken,handleError} = config
@@ -109,10 +111,11 @@ parseBiscuitWith config app req sendResponse = do
 -- generate a middleware that will extract a biscuit token from incoming
 -- requests, parse it, verify its signature and authorize it. Requests without
 -- an authorized biscuit are rejected, and the authorized biscuit is added to
--- the request context. __The underlying application will only receive requests
--- where the whole authorization process succeeded.__ If you want to only parse
--- tokens and delegate actual authorization to the underlying application, have
--- a look at `parseBiscuit` (or `parseBiscuitWith`).
+-- the request context.
+-- __The underlying application will only receive requests where the whole authorization process succeeded.__
+-- If you want to only parse tokens and delegate actual authorization to the
+-- underlying application, have a look at 'parseBiscuit'
+-- (or 'parseBiscuitWith').
 --
 -- The token is expected as a base64-encoded string, provided as a bearer token
 -- in the @Authorization@ header. A missing header results in a bodyless 401
@@ -121,7 +124,7 @@ parseBiscuitWith config app req sendResponse = do
 -- Errors are logged to stdout.
 --
 -- If you need custom extraction, parsing, authorization or error handling,
--- have a look at `authorizeBiscuitWith`.
+-- have a look at 'authorizeBiscuitWith'.
 authorizeBiscuit' :: PublicKey -> (Request -> IO Authorizer) -> Middleware
 authorizeBiscuit' publicKey = authorizeBiscuitWith . defaultAuthorizationConfig publicKey
 
@@ -129,14 +132,14 @@ authorizeBiscuit' publicKey = authorizeBiscuitWith . defaultAuthorizationConfig 
 -- handle errors, generate a middleware that will extract a biscuit token from
 -- incoming requests, parse it, verify its signature and authorize it.
 -- Requests without an authorized biscuit are rejected, and the authorized
--- biscuit is added to the request context. __The underlying application will
--- only receive requests where the whole authorization process succeeded.
--- __ If you want to only parse tokens and delegate actual authorization to the
--- underlying application, have a look at `parseBiscuit` (or
--- `parseBiscuitWith`).
+-- biscuit is added to the request context.
+-- __The underlying application will only receive requests where the whole authorization process succeeded__.
+-- If you want to only parse tokens and delegate actual authorization to the
+-- underlying application, have a look at 'parseBiscuit' (or
+-- 'parseBiscuitWith').
 --
 -- If you don’t need custom extraction, parsing, authorization, or error
--- handling logic, have a look at `authorizeBiscuit'`.
+-- handling logic, have a look at 'authorizeBiscuit''.
 authorizeBiscuitWith :: AuthorizationConfig e -> Middleware
 authorizeBiscuitWith config app req sendResponse = do
   let AuthorizationConfig{extractToken,parseToken,authorizeToken,handleError} = config
@@ -148,7 +151,7 @@ authorizeBiscuitWith config app req sendResponse = do
   eResult <- either (pure . Left) (authorizeToken req) eBiscuit
   either onError forward eResult
 
--- | Configuration for `parseBiscuitWith`.
+-- | Configuration for 'parseBiscuitWith'.
 data ExtractionConfig e
   = ExtractionConfig
   -- | How to extract a token from a request
@@ -159,7 +162,7 @@ data ExtractionConfig e
   , handleError  :: e -> IO Response
   }
 
--- | Configuration for `authorizeBiscuitWith`.
+-- | Configuration for 'authorizeBiscuitWith'.
 data AuthorizationConfig e
   = AuthorizationConfig
   -- | How to extract a token from a request

@@ -1,22 +1,26 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes       #-}
 module Main (main) where
 
-import           Auth.Biscuit                   (SecretKey, mkBiscuit,
-                                                 parseSecretKeyHex,
+import           Auth.Biscuit                   (SecretKey, authorizer, block,
+                                                 mkBiscuit, parseSecretKeyHex,
                                                  serializeB64, toPublic)
 import           Data.Maybe                     (fromMaybe)
+import           Data.Text.Encoding             (decodeUtf8)
 import           Network.HTTP.Client            (Response (responseStatus),
                                                  applyBearerAuth,
                                                  defaultManagerSettings,
                                                  httpLbs, newManager,
                                                  parseRequest)
 import           Network.HTTP.Types             (Status (..), badRequest400,
-                                                 ok200)
+                                                 notFound404, ok200)
 import           Network.Wai                    (Application,
-                                                 Request (pathInfo), ifRequest,
-                                                 responseLBS)
+                                                 Request (pathInfo, rawPathInfo),
+                                                 ifRequest, responseLBS)
 import qualified Network.Wai.Handler.Warp       as Warp
-import           Network.Wai.Middleware.Biscuit (getBiscuit, parseBiscuit)
+import           Network.Wai.Middleware.Biscuit (authorizeBiscuit',
+                                                 getAuthorizedBiscuit,
+                                                 getBiscuit, parseBiscuit)
 import           Test.Hspec                     (around, describe, hspec, it,
                                                  shouldBe)
 
@@ -28,12 +32,25 @@ otherSecretKey = fromMaybe (error "Failed parsing secret key") $ parseSecretKeyH
 
 app :: Application
 app =
-  let endpoint req sendResponse = case getBiscuit req of
-        Just _  -> sendResponse $ responseLBS ok200 mempty mempty
-        Nothing -> sendResponse $ responseLBS badRequest400 mempty mempty
+  let endpoint req sendResponse = case pathInfo req of
+        ["protected", "parsed"] ->
+          case getBiscuit req of
+            Just _  -> sendResponse $ responseLBS ok200 mempty mempty
+            Nothing -> sendResponse $ responseLBS badRequest400 mempty mempty
+        ["protected", "authed"] ->
+          case getAuthorizedBiscuit req of
+            Just _  -> sendResponse $ responseLBS ok200 mempty mempty
+            Nothing -> sendResponse $ responseLBS badRequest400 mempty mempty
+        [] -> sendResponse $ responseLBS ok200 mempty mempty
+        _ -> sendResponse $ responseLBS notFound404 mempty mempty
       checkBiscuit = parseBiscuit (toPublic secretKey)
-      isProtected = (== ["protected"]) . take 1 . pathInfo
-   in ifRequest isProtected checkBiscuit endpoint
+      checkBiscuit' = authorizeBiscuit' (toPublic secretKey) $ \req ->
+        let path = decodeUtf8 $ rawPathInfo req
+         in pure [authorizer|allow if right({path});|]
+      isProtectedParsed = (== ["protected", "parsed"]) . take 2 . pathInfo
+      isProtectedAuthed = (== ["protected", "authed"]) . take 2 . pathInfo
+   in ifRequest isProtectedParsed checkBiscuit $
+        ifRequest isProtectedAuthed checkBiscuit' endpoint
 
 withApp :: (Warp.Port -> IO ()) -> IO ()
 withApp =
@@ -48,30 +65,58 @@ main = do
   hspec $
     around withApp $
       describe "biscuit wai middleware" $ do
-        describe "on protected endpoints" $ do
+        describe "on open endpoints" $ do
+          it "accepts unauthenticated calls" $ \port -> do
+            req <- parseRequest $ "http://localhost:" <> show port
+            res <- httpLbs req manager
+            statusCode (responseStatus res) `shouldBe` 200
+        describe "on protected endpoints (parsing)" $ do
           it "rejects unauthenticated calls" $ \port -> do
-            req <- parseRequest $ "http://localhost:" <> show port <> "/protected"
+            req <- parseRequest $ "http://localhost:" <> show port <> "/protected/parsed"
             res <- httpLbs req manager
             statusCode (responseStatus res) `shouldBe` 401
           it "rejects gibberish tokens" $ \port -> do
-            req <- parseRequest $ "http://localhost:" <> show port <> "/protected"
+            req <- parseRequest $ "http://localhost:" <> show port <> "/protected/parsed"
             let withAuth = applyBearerAuth "whatevs" req
             res <- httpLbs withAuth manager
             statusCode (responseStatus res) `shouldBe` 403
           it "rejects tokens signed by the wrong keypair" $ \port -> do
             badToken <- mkBiscuit otherSecretKey mempty
-            req <- parseRequest $ "http://localhost:" <> show port <> "/protected"
+            req <- parseRequest $ "http://localhost:" <> show port <> "/protected/parsed"
             let withAuth = applyBearerAuth (serializeB64 badToken) req
             res <- httpLbs withAuth manager
             statusCode (responseStatus res) `shouldBe` 403
           it "accepts properly signed tokens" $ \port -> do
             goodToken <- mkBiscuit secretKey mempty
-            req <- parseRequest $ "http://localhost:" <> show port <> "/protected"
+            req <- parseRequest $ "http://localhost:" <> show port <> "/protected/parsed"
             let withAuth = applyBearerAuth (serializeB64 goodToken) req
             res <- httpLbs withAuth manager
             statusCode (responseStatus res) `shouldBe` 200
-        describe "on open endpoints" $ do
-          it "accepts unauthenticated calls, but doesn't provide a parsed token" $ \port -> do
-            req <- parseRequest $ "http://localhost:" <> show port
+        describe "on protected endpoints (auth)" $ do
+          it "rejects unauthenticated calls" $ \port -> do
+            req <- parseRequest $ "http://localhost:" <> show port <> "/protected/authed"
             res <- httpLbs req manager
-            statusCode (responseStatus res) `shouldBe` 400
+            statusCode (responseStatus res) `shouldBe` 401
+          it "rejects gibberish tokens" $ \port -> do
+            req <- parseRequest $ "http://localhost:" <> show port <> "/protected/authed"
+            let withAuth = applyBearerAuth "whatevs" req
+            res <- httpLbs withAuth manager
+            statusCode (responseStatus res) `shouldBe` 403
+          it "rejects tokens signed by the wrong keypair" $ \port -> do
+            badToken <- mkBiscuit otherSecretKey mempty
+            req <- parseRequest $ "http://localhost:" <> show port <> "/protected/authed"
+            let withAuth = applyBearerAuth (serializeB64 badToken) req
+            res <- httpLbs withAuth manager
+            statusCode (responseStatus res) `shouldBe` 403
+          it "rejects properly signed tokens which fail authorization" $ \port -> do
+            badToken <- mkBiscuit secretKey mempty
+            req <- parseRequest $ "http://localhost:" <> show port <> "/protected/authed"
+            let withAuth = applyBearerAuth (serializeB64 badToken) req
+            res <- httpLbs withAuth manager
+            statusCode (responseStatus res) `shouldBe` 403
+          it "accepts properly signed tokens which succeed authorization" $ \port -> do
+            goodToken <- mkBiscuit secretKey [block|right("/protected/authed");|]
+            req <- parseRequest $ "http://localhost:" <> show port <> "/protected/authed"
+            let withAuth = applyBearerAuth (serializeB64 goodToken) req
+            res <- httpLbs withAuth manager
+            statusCode (responseStatus res) `shouldBe` 200

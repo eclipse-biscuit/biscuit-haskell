@@ -54,6 +54,7 @@ test-suite biscuit-wai-test
     , hspec
     , http-client
     , http-types
+    , text
     , wai
     , warp
   default-language: Haskell2010

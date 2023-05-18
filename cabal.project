@@ -1,6 +1,7 @@
 packages:
   biscuit/
   biscuit-servant/
+  biscuit-wai/
 
 tests: True
 documentation: True

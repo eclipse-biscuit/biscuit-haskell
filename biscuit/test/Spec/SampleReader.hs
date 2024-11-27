@@ -268,6 +268,7 @@ compareParseErrors pe re =
           mustMatchEither
             [ key "Format" . key "Signature" . key "InvalidSignature"
             , key "Format" . key "InvalidSignatureSize"
+            , key "Format" . key "BlockSignatureDeserializationError"
             ]
         InvalidProof ->
           assertFailure $ "InvalidProof can't appear here " <> show re

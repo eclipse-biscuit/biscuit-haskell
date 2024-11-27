@@ -100,7 +100,7 @@ exprEval = do
    --   ("1 / 0") @?= Left "Divide by 0"
   testGroup "Expressions evaluation" $ eval <$>
     [ ("!(1 < $var1)", LBool True)
-    , ("[0].contains($var1)", LBool True)
+    , ("{0}.contains($var1)", LBool True)
     , ("1 + 2 * 3", LInteger 7)
     , ("!(1 + 2 * 3 > 4)", LBool False)
     , ("!true", LBool False)
@@ -109,22 +109,22 @@ exprEval = do
     , ("\"test\".length()", LInteger 4)
     , ("\"é\".length()", LInteger 2)
     , ("hex:ababab.length()", LInteger 3)
-    , ("[].length()", LInteger 0)
-    , ("[\"test\", \"test\"].length()", LInteger 1)
-    , ("1 == 1", LBool True)
-    , ("2 == 1", LBool False)
-    , ("\"toto\" == \"toto\"", LBool True)
-    , ("\"toto\" == \"truc\"", LBool False)
+    , ("{}.length()", LInteger 0)
+    , ("{\"test\", \"test\"}.length()", LInteger 1)
+    , ("1 === 1", LBool True)
+    , ("2 === 1", LBool False)
+    , ("\"toto\" === \"toto\"", LBool True)
+    , ("\"toto\" === \"truc\"", LBool False)
     , ("\"toto\".matches(\"to(to)?\")", LBool True)
     , ("\"toto\".matches(\"^to$\")", LBool False)
-    , ("2021-05-07T18:00:00Z == 2021-05-07T18:00:00Z", LBool True)
-    , ("2021-05-07T18:00:00Z == 2021-05-07T19:00:00Z", LBool False)
-    , ("hex:ababab == hex:ababab", LBool True)
-    , ("hex:ababab == hex:ababac", LBool False)
-    , ("true == true", LBool True)
-    , ("true == false", LBool False)
-    , ("[1,2,3] == [1,2,3]", LBool True)
-    , ("[1,2,3] == [1,2,4]", LBool False)
+    , ("2021-05-07T18:00:00Z === 2021-05-07T18:00:00Z", LBool True)
+    , ("2021-05-07T18:00:00Z === 2021-05-07T19:00:00Z", LBool False)
+    , ("hex:ababab === hex:ababab", LBool True)
+    , ("hex:ababab === hex:ababac", LBool False)
+    , ("true === true", LBool True)
+    , ("true === false", LBool False)
+    , ("{1,2,3} === {1,2,3}", LBool True)
+    , ("{1,2,3} === {1,2,4}", LBool False)
     , ("1 < 2", LBool True)
     , ("2 < 1", LBool False)
     , ("2021-05-07T18:00:00Z < 2021-05-07T19:00:00Z", LBool True)
@@ -162,14 +162,14 @@ exprEval = do
     , ("true || false", LBool True)
     , ("false || true", LBool True)
     , ("false || false", LBool False)
-    , ("[1].contains([1])", LBool True)
-    , ("[1].contains(1)", LBool True)
-    , ("[].contains(1)", LBool False)
-    , ("[\"test\"].contains(2)", LBool False)
-    , ("[1].intersection([1])", TermSet (Set.fromList [LInteger 1]))
-    , ("[1].intersection([\"test\"])", TermSet (Set.fromList []))
-    , ("[1].union([1])", TermSet (Set.fromList [LInteger 1]))
-    , ("[1].union([\"test\"])", TermSet (Set.fromList [LInteger 1, LString "test"]))
+    , ("{1}.contains({1})", LBool True)
+    , ("{1}.contains(1)", LBool True)
+    , ("{}.contains(1)", LBool False)
+    , ("{\"test\"}.contains(2)", LBool False)
+    , ("{1}.intersection({1})", TermSet (Set.fromList [LInteger 1]))
+    , ("{1}.intersection({\"test\"})", TermSet (Set.fromList []))
+    , ("{1}.union({1})", TermSet (Set.fromList [LInteger 1]))
+    , ("{1}.union({\"test\"})", TermSet (Set.fromList [LInteger 1, LString "test"]))
     ]
 
 exprEvalError :: TestTree
@@ -306,11 +306,11 @@ scopedRules = testGroup "Rules and facts in different scopes"
 overflow :: TestTree
 overflow =
   let subtraction = authRulesGroup $ Set.singleton
-                   [rule|test(true) <- -9223372036854775808 - 1 != 0|]
+                   [rule|test(true) <- -9223372036854775808 - 1 !== 0|]
       multiplication = authRulesGroup $ Set.singleton
-                   [rule|test(true) <- 10000000000 * 10000000000 != 0|]
+                   [rule|test(true) <- 10000000000 * 10000000000 !== 0|]
       addition = authRulesGroup $ Set.singleton
-                   [rule|test(true) <- 9223372036854775807 + 1 != 0|]
+                   [rule|test(true) <- 9223372036854775807 + 1 !== 0|]
    in testGroup "Arithmetic overflow"
         [ testCase "subtraction" $
             runFactGeneration defaultLimits 1 subtraction mempty @?= Left (BadExpression "integer underflow")

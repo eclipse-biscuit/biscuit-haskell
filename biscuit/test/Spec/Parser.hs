@@ -418,6 +418,12 @@ checkParsing = testGroup "check blocks"
           { cQueries = [QueryItem [] [EValue $ LBool True] []]
           , cKind = All
           }
+  , testCase "Simple reject if" $
+      parseCheck "reject if true" @?=
+        Right Check
+          { cQueries = [QueryItem [] [EValue $ LBool True] []]
+          , cKind = Reject
+          }
   , testCase "Multiple groups" $
       parseCheck
         "check if fact($var), $var === true or \
@@ -447,6 +453,21 @@ checkParsing = testGroup "check blocks"
                             []
                 ]
             , cKind = All
+            }
+  , testCase "Multiple reject if groups" $
+      parseCheck
+        "reject if fact($var), $var === true or \
+        \other($var), $var === 2" @?=
+          Right Check
+            { cQueries =
+                [ QueryItem [Predicate "fact" [Variable "var"]]
+                            [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
+                            []
+                , QueryItem [Predicate "other" [Variable "var"]]
+                            [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
+                            []
+                ]
+            , cKind = Reject
             }
   , testCase "Multiple groups, scoped" $
       parseCheck

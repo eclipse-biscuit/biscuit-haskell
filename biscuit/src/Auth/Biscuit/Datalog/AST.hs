@@ -90,6 +90,7 @@ module Auth.Biscuit.Datalog.AST
   , ruleHasNoScope
   , ruleHasNoV4Operators
   , isCheckOne
+  , isReject
   , renderBlock
   , renderAuthorizer
   , renderFact
@@ -453,7 +454,7 @@ makeQueryItem qBody qExpressions qScope =
         Just vs -> Failure vs
 
 
-data CheckKind = One | All
+data CheckKind = One | All | Reject
   deriving (Eq, Show, Ord, Lift)
 
 data Check' evalCtx ctx = Check
@@ -474,6 +475,9 @@ type EvalCheck = Check' 'Eval 'Representation
 
 isCheckOne :: Check' evalCtx ctx -> Bool
 isCheckOne Check{cKind} = cKind == One
+
+isReject :: Check' evalCtx ctx -> Bool
+isReject Check{cKind} = cKind == Reject
 
 data PolicyType = Allow | Deny
   deriving (Eq, Show, Ord, Lift)
@@ -516,10 +520,11 @@ renderQueryItem QueryItem{..} =
 
 renderCheck :: Check -> Text
 renderCheck Check{..} =
-  let kindToken = case cKind of
-        One -> "if"
-        All -> "all"
-   in "check " <> kindToken <> " " <>
+  let keyword = case cKind of
+        One    -> "check if"
+        All    -> "check all"
+        Reject -> "reject if"
+   in keyword <> " " <>
       intercalate "\n or " (renderQueryItem <$> cQueries)
 
 listSymbolsInQueryItem :: QueryItem' evalCtx 'Representation -> Set.Set Text

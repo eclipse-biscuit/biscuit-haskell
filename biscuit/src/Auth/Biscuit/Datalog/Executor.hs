@@ -191,13 +191,25 @@ countFacts (FactGroup facts) = sum $ Set.size <$> Map.elems facts
 
 checkCheck :: Limits -> Natural -> Natural -> FactGroup -> EvalCheck -> Either String (Validation (NonEmpty Check) ())
 checkCheck l blockCount checkBlockId facts c@Check{cQueries,cKind} = do
-  let isQueryItemOk = case cKind of
-        One -> isQueryItemSatisfied l blockCount checkBlockId facts
-        All -> isQueryItemSatisfiedForAllMatches l blockCount checkBlockId facts
-  hasOkQueryItem <- anyM (fmap isJust . isQueryItemOk) cQueries
-  pure $ if hasOkQueryItem
-         then Success ()
-         else failure (toRepresentation c)
+  let queryMatchesOne = isQueryItemSatisfied l blockCount checkBlockId facts
+  let queryMatchesAll = isQueryItemSatisfiedForAllMatches l blockCount checkBlockId facts
+
+  case cKind of
+    One -> do
+       hasOkQueryItem <- anyM (fmap isJust . queryMatchesOne) cQueries
+       pure $ if hasOkQueryItem
+              then Success ()
+              else failure (toRepresentation c)
+    All -> do
+       hasOkQueryItem <- anyM (fmap isJust . queryMatchesAll) cQueries
+       pure $ if hasOkQueryItem
+              then Success ()
+              else failure (toRepresentation c)
+    Reject -> do
+       hasOkQueryItem <- anyM (fmap isJust . queryMatchesOne) cQueries
+       pure $ if not hasOkQueryItem
+              then Success ()
+              else failure (toRepresentation c)
 
 checkPolicy :: Limits -> Natural -> FactGroup -> EvalPolicy -> Either String (Maybe (Either MatchedQuery MatchedQuery))
 checkPolicy l blockCount facts (pType, query) = do

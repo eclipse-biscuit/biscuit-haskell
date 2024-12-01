@@ -132,7 +132,8 @@ pbToBlock ePk PB.Block{..} = do
     bRules <- traverse (pbToRule s) $ PB.getField rules_v2
     bChecks <- traverse (pbToCheck s) $ PB.getField checks_v2
     bScope <- Set.fromList <$> traverse (pbToScope s) (PB.getField scope)
-    let v5Plus = isJust ePk
+    let v6Plus = any isReject bChecks
+        v5Plus = isJust ePk
         v4Plus = not $ and
           [ Set.null bScope
           , all ruleHasNoScope bRules
@@ -141,18 +142,25 @@ pbToBlock ePk PB.Block{..} = do
           , all ruleHasNoV4Operators bRules
           , all (queryHasNoV4Operators . cQueries) bChecks
           ]
-    case (bVersion, v4Plus, v5Plus) of
-      (Just 5, _, _) -> pure Block {..}
-      (Just 4, _, False) -> pure Block {..}
-      (Just 4, _, True) ->
+    case (bVersion, v4Plus, v5Plus, v6Plus) of
+      (Just 6, _, _, _) -> pure Block {..}
+      (Just 5, _, _, True) ->
+        Left "Biscuit v6 features are present, but the block version is 5."
+      (Just 5, _, _, _) -> pure Block {..}
+      (Just 4, _, False, False) -> pure Block {..}
+      (Just 4, _, _, True) ->
+        Left "Biscuit v6 features are present, but the block version is 4."
+      (Just 4, _, True, False) ->
         Left "Biscuit v5 features are present, but the block version is 4."
-      (Just 3, False, False) -> pure Block {..}
-      (Just 3, True, False) ->
+      (Just 3, False, False, False) -> pure Block {..}
+      (Just 3, True, False, False) ->
         Left "Biscuit v4 features are present, but the block version is 3."
-      (Just 3, _, True) ->
+      (Just 3, _, True, False) ->
         Left "Biscuit v5 features are present, but the block version is 3."
+      (Just 3, _, _, True) ->
+        Left "Biscuit v6 features are present, but the block version is 3."
       _ ->
-        Left $ "Unsupported biscuit version: " <> maybe "0" show bVersion <> ". Only versions 3 and 4 are supported"
+        Left $ "Unsupported biscuit version: " <> maybe "0" show bVersion <> ". Only versions 3 to 6 are supported"
 
 -- | Turn a biscuit block into a protobuf block, for serialization,
 -- along with the newly defined symbols
@@ -227,9 +235,10 @@ pbToCheck s PB.CheckV2{queries,kind} = do
   rules <- traverse (pbToRule s) $ PB.getField queries
   let cQueries = toCheck <$> rules
   let cKind = case PB.getField kind of
-        Just PB.All -> All
-        Just PB.One -> One
-        Nothing     -> One
+        Just PB.All    -> All
+        Just PB.One    -> One
+        Just PB.Reject -> Reject
+        Nothing        -> One
   pure Check{..}
 
 checkToPb :: ReverseSymbols -> Check -> PB.CheckV2
@@ -242,8 +251,9 @@ checkToPb s Check{..} =
                           , scope = qScope
                           }
       pbKind = case cKind of
-        One -> Nothing
-        All -> Just PB.All
+        One    -> Nothing
+        All    -> Just PB.All
+        Reject -> Just PB.Reject
    in PB.CheckV2 { queries = PB.putField $ toQuery <$> cQueries
                  , kind = PB.putField pbKind
                  }

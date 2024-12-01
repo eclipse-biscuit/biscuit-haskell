@@ -364,6 +364,7 @@ checkParser :: Bool -> Parser (Check' 'Repr 'WithSlices)
 checkParser inAuthorizer = do
   cKind <- l $ choice [ One <$ chunk "check if"
                       , All <$ chunk "check all"
+                      , Reject <$ chunk "reject if"
                       ]
   cQueries <- queryParser inAuthorizer
   pure Check{..}

@@ -136,6 +136,7 @@ termParser parseVar parseSet = l $ choice
                      , False <$ chunk "false"
                      ]
           <?> "boolean value (eg. true or false)"
+  , LNull <$ chunk "null" <?> "null value"
   ]
 
 intParser :: Parser Int64
@@ -256,6 +257,8 @@ table =
         , infixN  ">"  GreaterThan
         , infixN  "===" Equal
         , infixN  "!==" NotEqual
+        , infixN  "==" HeterogeneousEqual
+        , infixN  "!=" HeterogeneousNotEqual
         ]
       , [ infixL "&&" And ]
       , [ infixL "||" Or ]

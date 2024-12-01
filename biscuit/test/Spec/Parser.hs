@@ -67,6 +67,7 @@ parseBlock = runWithNoParams blockParser $ substituteBlock mempty mempty
 specs :: TestTree
 specs = testGroup "datalog parser"
   [ factWithDate
+  , factWithNull
   , simpleFact
   , oneLetterFact
   , simpleRule
@@ -133,6 +134,11 @@ factWithDate = testCase "Parse fact containing a date" $ do
     Right (Predicate "date" [LDate $ read "2019-12-02 13:49:53.001 UTC"])
   parsePredicate "date(2019-12-02T13:49:53+00:00)" @?=
     Right (Predicate "date" [LDate $ read "2019-12-02 13:49:53 UTC"])
+
+factWithNull :: TestTree
+factWithNull = testCase "Parse fact containing a null value" $ do
+  parsePredicate "date(null)" @?=
+    Right (Predicate "date" [LNull])
 
 simpleRule :: TestTree
 simpleRule = testCase "Parse simple rule" $
@@ -215,6 +221,18 @@ constraints = testGroup "Parse expressions"
   , testCase "int comparison (NEQ)" $
       parseExpression "$0 !== 1" @?=
         Right (EBinary NotEqual
+                 (EValue (Variable "0"))
+                 (EValue (LInteger 1))
+                 )
+  , testCase "int comparison (HEQ)" $
+      parseExpression "$0 == 1" @?=
+        Right (EBinary HeterogeneousEqual
+                 (EValue (Variable "0"))
+                 (EValue (LInteger 1))
+                 )
+  , testCase "int comparison (HNEQ)" $
+      parseExpression "$0 != 1" @?=
+        Right (EBinary HeterogeneousNotEqual
                  (EValue (Variable "0"))
                  (EValue (LInteger 1))
                  )

@@ -52,7 +52,7 @@ import           Auth.Biscuit.Utils            (encodeHex)
 import           Spec.Parser                   (parseAuthorizer, parseBlock)
 
 getB :: ParsedSignedBlock -> Block
-getB ((_, b), _, _, _) = b
+getB ((_, b), _, _, _, _) = b
 
 getAuthority :: Biscuit p Verified -> Block
 getAuthority = getB . authority

@@ -83,6 +83,7 @@ data SignedBlock = SignedBlock
   , nextKey     :: Required 2 (Message PublicKey)
   , signature   :: Required 3 (Value ByteString)
   , externalSig :: Optional 4 (Message ExternalSig)
+  , version     :: Optional 5 (Value Int32)
   }
   deriving (Generic, Show)
   deriving anyclass (Decode, Encode)
@@ -253,8 +254,9 @@ decodeThirdPartyBlockContents = runGet decodeMessage
 
 data ThirdPartyBlockRequest
   = ThirdPartyBlockRequest
-  { previousPk :: Required 1 (Message PublicKey)
-  , pkTable    :: Repeated 2 (Message PublicKey)
+  { legacyPk :: Optional 1 (Message PublicKey)
+  , pkTable  :: Repeated 2 (Message PublicKey)
+  , prevSig  :: Required 3 (Value ByteString)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 

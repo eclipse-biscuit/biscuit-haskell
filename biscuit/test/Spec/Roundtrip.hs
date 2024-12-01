@@ -58,7 +58,7 @@ roundtrip' (s,p) i@(authority' :| blocks') = do
   final <- addBlocks blocks' init'
   let serialized = s final
       parsed = p pk serialized
-      getBlock ((_, b), _, _, _) = b
+      getBlock ((_, b), _, _, _, _) = b
       getBlocks b = getBlock <$> authority b :| blocks b
   getBlocks <$> parsed @?= Right (snd <$> i)
   rootKeyId <$> parsed @?= Right (Just 1)
@@ -87,7 +87,7 @@ roundtrip'' direct (s,p) i@(authority' :| blocks') = do
   final <- addBlocks blocks' init'
   let serialized = s final
       parsed = p pk serialized
-      getBlock ((_, b), _, _, _) = b
+      getBlock ((_, b), _, _, _, _) = b
       getBlocks b = getBlock <$> authority b :| blocks b
   getBlocks <$> parsed @?= Right (snd <$> i)
   rootKeyId <$> parsed @?= Right (Just 1)

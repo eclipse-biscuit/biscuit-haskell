@@ -72,10 +72,12 @@ pbToSignedBlock PB.SignedBlock{..} = do
   let sig = Crypto.signature $ PB.getField signature
   mSig <- traverse pbToOptionalSignature $ PB.getField externalSig
   pk  <- pbToPublicKey $ PB.getField nextKey
+  let sigVersion = fromIntegral <$> PB.getField version
   pure ( PB.getField block
        , sig
        , pk
        , mSig
+       , sigVersion
        )
 
 publicKeyToPb :: Crypto.PublicKey -> PB.PublicKey
@@ -91,11 +93,12 @@ externalSigToPb (sig, pk) = PB.ExternalSig
   }
 
 signedBlockToPb :: Crypto.SignedBlock -> PB.SignedBlock
-signedBlockToPb (block, sig, pk, eSig) = PB.SignedBlock
+signedBlockToPb (block, sig, pk, eSig, sigVersion) = PB.SignedBlock
   { block = PB.putField block
   , signature = PB.putField $ Crypto.sigBytes sig
   , nextKey = PB.putField $ publicKeyToPb pk
   , externalSig = PB.putField $ externalSigToPb <$> eSig
+  , version = PB.putField $ fromIntegral <$> sigVersion
   }
 
 pbToProof :: PB.Proof -> Either String (Either Crypto.Signature Crypto.SecretKey)
@@ -153,7 +156,7 @@ pbToBlock ePk PB.Block{..} = do
 
 -- | Turn a biscuit block into a protobuf block, for serialization,
 -- along with the newly defined symbols
-blockToPb :: Bool -> Symbols -> Block -> (BlockSymbols, PB.Block)
+blockToPb :: Bool -> Symbols -> Block -> ((BlockSymbols, Int), PB.Block)
 blockToPb hasExternalPk existingSymbols b@Block{..} =
   let v4Plus = not $ and
         [Set.null bScope
@@ -173,10 +176,10 @@ blockToPb hasExternalPk existingSymbols b@Block{..} =
       checks_v2 = PB.putField $ checkToPb s <$> bChecks
       scope     = PB.putField $ scopeToPb s <$> Set.toList bScope
       pksTable   = PB.putField $ publicKeyToPb <$> getPkList bSymbols
-      version   = PB.putField $ if | v5Plus    -> Just 5
-                                   | v4Plus    -> Just 4
-                                   | otherwise -> Just 3
-   in (bSymbols, PB.Block {..})
+      version   =  if | v5Plus    -> 5
+                      | v4Plus    -> 4
+                      | otherwise -> 3
+   in ((bSymbols, version), PB.Block {version = PB.putField $ Just $ fromIntegral version, ..})
 
 pbToFact :: Symbols -> PB.FactV2 -> Either String Fact
 pbToFact s PB.FactV2{predicate} = do
@@ -425,15 +428,17 @@ binaryToPb = PB.OpBinary . PB.putField . \case
   BitwiseXor     -> PB.BitwiseXor
   NotEqual       -> PB.NotEqual
 
-pbToThirdPartyBlockRequest :: PB.ThirdPartyBlockRequest -> Either String Crypto.PublicKey
-pbToThirdPartyBlockRequest PB.ThirdPartyBlockRequest{previousPk, pkTable} = do
+pbToThirdPartyBlockRequest :: PB.ThirdPartyBlockRequest -> Either String Crypto.Signature
+pbToThirdPartyBlockRequest PB.ThirdPartyBlockRequest{legacyPk, pkTable, prevSig} = do
+  unless (isNothing $ PB.getField legacyPk) $ Left "Public key provided in third-party block request"
   unless (null $ PB.getField pkTable) $ Left "Public key table provided in third-party block request"
-  pbToPublicKey $ PB.getField previousPk
+  pure . Crypto.signature $ PB.getField prevSig
 
-thirdPartyBlockRequestToPb :: Crypto.PublicKey -> PB.ThirdPartyBlockRequest
-thirdPartyBlockRequestToPb previousPk = PB.ThirdPartyBlockRequest
-  { previousPk = PB.putField $ publicKeyToPb previousPk
+thirdPartyBlockRequestToPb :: Crypto.Signature -> PB.ThirdPartyBlockRequest
+thirdPartyBlockRequestToPb prevSig = PB.ThirdPartyBlockRequest
+  { legacyPk = PB.putField Nothing
   , pkTable = PB.putField []
+  , prevSig = PB.putField $ Crypto.sigBytes prevSig
   }
 
 pbToThirdPartyBlockContents :: PB.ThirdPartyBlockContents -> Either String (ByteString, Crypto.Signature, Crypto.PublicKey)

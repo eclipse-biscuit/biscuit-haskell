@@ -132,7 +132,12 @@ pbToBlock ePk PB.Block{..} = do
     bRules <- traverse (pbToRule s) $ PB.getField rules_v2
     bChecks <- traverse (pbToCheck s) $ PB.getField checks_v2
     bScope <- Set.fromList <$> traverse (pbToScope s) (PB.getField scope)
-    let v6Plus = any isReject bChecks
+    let v6Plus = or
+          [ any isReject bChecks
+          , not (all predicateHasNoV6Values bFacts)
+          , not (all ruleHasNoV6Values bRules)
+          , not (all checkHasNoV6Values bChecks)
+          ]
         v5Plus = isJust ePk
         v4Plus = not $ and
           [ Set.null bScope
@@ -299,6 +304,7 @@ pbToTerm s = \case
   PB.TermBool     f -> pure $ LBool    $ PB.getField f
   PB.TermVariable f -> Variable <$> getSymbol s (SymbolRef $ PB.getField f)
   PB.TermTermSet  f -> TermSet . Set.fromList <$> traverse (pbToSetValue s) (PB.getField . PB.set $ PB.getField f)
+  PB.TermNull     _ -> pure LNull
 
 termToPb :: ReverseSymbols -> Term -> PB.TermV2
 termToPb s = \case
@@ -309,6 +315,7 @@ termToPb s = \case
   LBytes   v -> PB.TermBytes    $ PB.putField v
   LBool    v -> PB.TermBool     $ PB.putField v
   TermSet vs -> PB.TermTermSet  $ PB.putField $ PB.TermSet $ PB.putField $ setValueToPb s <$> Set.toList vs
+  LNull      -> PB.TermNull     $ PB.putField $ PB.Empty {}
 
   Antiquote v -> absurd v
 
@@ -321,6 +328,7 @@ pbToValue s = \case
   PB.TermBool     f -> pure $ LBool    $ PB.getField f
   PB.TermVariable _ -> Left "Variables can't appear in facts"
   PB.TermTermSet  f -> TermSet . Set.fromList <$> traverse (pbToSetValue s) (PB.getField . PB.set $ PB.getField f)
+  PB.TermNull     _ -> pure LNull
 
 valueToPb :: ReverseSymbols -> Value -> PB.TermV2
 valueToPb s = \case
@@ -330,6 +338,7 @@ valueToPb s = \case
   LBytes   v -> PB.TermBytes   $ PB.putField v
   LBool    v -> PB.TermBool    $ PB.putField v
   TermSet vs -> PB.TermTermSet $ PB.putField $ PB.TermSet $ PB.putField $ setValueToPb s <$> Set.toList vs
+  LNull      -> PB.TermNull $ PB.putField PB.Empty
 
   Variable v  -> absurd v
   Antiquote v -> absurd v
@@ -341,6 +350,7 @@ pbToSetValue s = \case
   PB.TermDate     f -> pure $ LDate    $ pbTimeToUtcTime $ PB.getField f
   PB.TermBytes    f -> pure $ LBytes   $ PB.getField f
   PB.TermBool     f -> pure $ LBool    $ PB.getField f
+  PB.TermNull     _ -> pure LNull
   PB.TermVariable _ -> Left "Variables can't appear in facts or sets"
   PB.TermTermSet  _ -> Left "Sets can't be nested"
 
@@ -351,6 +361,7 @@ setValueToPb s = \case
   LDate    v  -> PB.TermDate    $ PB.putField $ round $ utcTimeToPOSIXSeconds v
   LBytes   v  -> PB.TermBytes   $ PB.putField v
   LBool    v  -> PB.TermBool    $ PB.putField v
+  LNull      -> PB.TermNull     $ PB.putField $ PB.Empty {}
 
   TermSet   v -> absurd v
   Variable  v -> absurd v
@@ -392,27 +403,29 @@ unaryToPb = PB.OpUnary . PB.putField . \case
 
 pbToBinary :: PB.OpBinary -> Binary
 pbToBinary PB.OpBinary{kind} = case PB.getField kind of
-  PB.LessThan       -> LessThan
-  PB.GreaterThan    -> GreaterThan
-  PB.LessOrEqual    -> LessOrEqual
-  PB.GreaterOrEqual -> GreaterOrEqual
-  PB.Equal          -> Equal
-  PB.Contains       -> Contains
-  PB.Prefix         -> Prefix
-  PB.Suffix         -> Suffix
-  PB.Regex          -> Regex
-  PB.Add            -> Add
-  PB.Sub            -> Sub
-  PB.Mul            -> Mul
-  PB.Div            -> Div
-  PB.And            -> And
-  PB.Or             -> Or
-  PB.Intersection   -> Intersection
-  PB.Union          -> Union
-  PB.BitwiseAnd     -> BitwiseAnd
-  PB.BitwiseOr      -> BitwiseOr
-  PB.BitwiseXor     -> BitwiseXor
-  PB.NotEqual       -> NotEqual
+  PB.LessThan              -> LessThan
+  PB.GreaterThan           -> GreaterThan
+  PB.LessOrEqual           -> LessOrEqual
+  PB.GreaterOrEqual        -> GreaterOrEqual
+  PB.Equal                 -> Equal
+  PB.Contains              -> Contains
+  PB.Prefix                -> Prefix
+  PB.Suffix                -> Suffix
+  PB.Regex                 -> Regex
+  PB.Add                   -> Add
+  PB.Sub                   -> Sub
+  PB.Mul                   -> Mul
+  PB.Div                   -> Div
+  PB.And                   -> And
+  PB.Or                    -> Or
+  PB.Intersection          -> Intersection
+  PB.Union                 -> Union
+  PB.BitwiseAnd            -> BitwiseAnd
+  PB.BitwiseOr             -> BitwiseOr
+  PB.BitwiseXor            -> BitwiseXor
+  PB.NotEqual              -> NotEqual
+  PB.HeterogeneousEqual    -> HeterogeneousEqual
+  PB.HeterogeneousNotEqual -> HeterogeneousNotEqual
 
 binaryToPb :: Binary -> PB.OpBinary
 binaryToPb = PB.OpBinary . PB.putField . \case
@@ -437,6 +450,8 @@ binaryToPb = PB.OpBinary . PB.putField . \case
   BitwiseOr      -> PB.BitwiseOr
   BitwiseXor     -> PB.BitwiseXor
   NotEqual       -> PB.NotEqual
+  HeterogeneousEqual -> PB.HeterogeneousEqual
+  HeterogeneousNotEqual -> PB.HeterogeneousNotEqual
 
 pbToThirdPartyBlockRequest :: PB.ThirdPartyBlockRequest -> Either String Crypto.Signature
 pbToThirdPartyBlockRequest PB.ThirdPartyBlockRequest{legacyPk, pkTable, prevSig} = do

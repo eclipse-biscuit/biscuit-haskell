@@ -29,6 +29,7 @@ module Auth.Biscuit.Proto
   , TermV2 (..)
   , ExpressionV2 (..)
   , TermSet (..)
+  , Empty (..)
   , Op (..)
   , OpUnary (..)
   , UnaryKind (..)
@@ -160,6 +161,11 @@ data TermV2 =
   | TermBytes    (Required 5 (Value ByteString))
   | TermBool     (Required 6 (Value Bool))
   | TermTermSet  (Required 7 (Message TermSet))
+  | TermNull     (Required 8 (Message Empty))
+    deriving stock (Generic, Show)
+    deriving anyclass (Decode, Encode)
+
+data Empty = Empty {}
     deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -211,6 +217,8 @@ data BinaryKind =
   | BitwiseOr
   | BitwiseXor
   | NotEqual
+  | HeterogeneousEqual
+  | HeterogeneousNotEqual
   deriving stock (Show, Enum, Bounded)
 
 newtype OpBinary = OpBinary

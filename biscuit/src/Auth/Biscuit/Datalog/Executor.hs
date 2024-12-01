@@ -286,6 +286,7 @@ applyBindings p@Predicate{terms} (origins, bindings) =
       replaceTerm (LDate t)     = Just $ LDate t
       replaceTerm (LBytes t)    = Just $ LBytes t
       replaceTerm (LBool t)     = Just $ LBool t
+      replaceTerm LNull         = Just LNull
       replaceTerm (TermSet t)   = Just $ TermSet t
       replaceTerm (Antiquote t) = absurd t
    in (\nt -> (origins, p { terms = nt})) <$> newTerms
@@ -341,6 +342,7 @@ isSame (LDate t)    (LDate t')    = t == t'
 isSame (LBytes t)   (LBytes t')   = t == t'
 isSame (LBool t)    (LBool t')    = t == t'
 isSame (TermSet t)  (TermSet t')  = t == t'
+isSame LNull        LNull         = True
 isSame _ _                        = False
 
 -- | Given a predicate and a fact, try to match the fact to the predicate,
@@ -378,6 +380,7 @@ applyVariable bindings = \case
   LDate t     -> Right $ LDate t
   LBytes t    -> Right $ LBytes t
   LBool t     -> Right $ LBool t
+  LNull       -> Right LNull
   TermSet t   -> Right $ TermSet t
   Antiquote v -> absurd v
 
@@ -406,6 +409,8 @@ evalBinary _ NotEqual (LBytes t) (LBytes t')     = pure $ LBool (t /= t')
 evalBinary _ NotEqual (LBool t) (LBool t')       = pure $ LBool (t /= t')
 evalBinary _ NotEqual (TermSet t) (TermSet t')   = pure $ LBool (t /= t')
 evalBinary _ NotEqual _ _                        = Left "Inequity mismatch"
+evalBinary _ HeterogeneousEqual t t'             = pure $ LBool (t == t')
+evalBinary _ HeterogeneousNotEqual t t'          = pure $ LBool (t /= t')
 evalBinary _ LessThan (LInteger i) (LInteger i') = pure $ LBool (i < i')
 evalBinary _ LessThan (LDate t) (LDate t')       = pure $ LBool (t < t')
 evalBinary _ LessThan _ _                        = Left "< mismatch"

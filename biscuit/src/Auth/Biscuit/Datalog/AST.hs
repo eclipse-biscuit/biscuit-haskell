@@ -89,6 +89,9 @@ module Auth.Biscuit.Datalog.AST
   , queryHasNoV4Operators
   , ruleHasNoScope
   , ruleHasNoV4Operators
+  , ruleHasNoV6Values
+  , predicateHasNoV6Values
+  , checkHasNoV6Values
   , isCheckOne
   , isReject
   , renderBlock
@@ -213,6 +216,8 @@ data Term' (inSet :: IsWithinSet) (pof :: PredicateOrFact) (ctx :: DatalogContex
   -- ^ A slice (eg. @{name}@)
   | TermSet (SetType inSet ctx)
   -- ^ A set (eg. @[true, false]@)
+  | LNull
+  -- ^ @null@
 
 deriving instance ( Eq (VariableType inSet pof)
                   , Eq (SliceType ctx)
@@ -250,6 +255,7 @@ instance  ( Lift (VariableType inSet pof)
   lift (LBool b)       = [| LBool  b |]
   lift (TermSet terms) = [| TermSet terms |]
   lift (LDate t)       = [| LDate (read $(lift $ show t)) |]
+  lift LNull           = [| LNull |]
   lift (Antiquote s)   = [| s |]
 
 #if MIN_VERSION_template_haskell(2,17,0)
@@ -324,6 +330,7 @@ valueToSetTerm = \case
   LDate i     -> Just $ LDate i
   LBytes i    -> Just $ LBytes i
   LBool i     -> Just $ LBool i
+  LNull       -> Just LNull
   TermSet _   -> Nothing
   Variable v  -> absurd v
   Antiquote v -> absurd v
@@ -335,6 +342,7 @@ valueToTerm = \case
   LDate i     -> LDate i
   LBytes i    -> LBytes i
   LBool i     -> LBool i
+  LNull       -> LNull
   TermSet i   -> TermSet i
   Variable v  -> absurd v
   Antiquote v -> absurd v
@@ -351,6 +359,7 @@ renderId' var set slice = \case
   LBytes bs     -> "hex:" <> encodeHex bs
   LBool True    -> "true"
   LBool False   -> "false"
+  LNull         -> "null"
   TermSet terms -> set terms
   Antiquote v   -> slice v
 
@@ -609,6 +618,35 @@ ruleHasNoV4Operators :: Rule -> Bool
 ruleHasNoV4Operators Rule{expressions} =
   all expressionHasNoV4Operators expressions
 
+expressionHasNoV6ValuesOrOperators :: Expression -> Bool
+expressionHasNoV6ValuesOrOperators = \case
+  EBinary HeterogeneousEqual _ _ -> False
+  EBinary HeterogeneousNotEqual _ _ -> False
+  EBinary _ l r -> expressionHasNoV6ValuesOrOperators l && expressionHasNoV6ValuesOrOperators r
+  EUnary _ l -> expressionHasNoV6ValuesOrOperators l
+  EValue LNull -> False
+  EValue _ -> True
+
+ruleHasNoV6Values :: Rule -> Bool
+ruleHasNoV6Values Rule{rhead, body, expressions} =
+         predicateHasNoV6Values rhead
+  && all predicateHasNoV6Values body
+  && all expressionHasNoV6ValuesOrOperators expressions
+
+predicateHasNoV6Values :: Predicate' a b -> Bool
+predicateHasNoV6Values Predicate{terms} =
+  let hasV6 = \case
+        LNull -> True
+        _ -> False
+   in not (any hasV6 terms)
+
+checkHasNoV6Values :: Check -> Bool
+checkHasNoV6Values Check{cQueries} =
+  let hasNoV6 QueryItem{qBody, qExpressions} =
+           all predicateHasNoV6Values qBody
+        && all expressionHasNoV6ValuesOrOperators qExpressions
+   in all hasNoV6 cQueries
+
 renderRule :: Rule -> Text
 renderRule Rule{rhead,body,expressions,scope} =
      renderPredicate rhead <> " <- "
@@ -685,6 +723,8 @@ data Binary =
   | BitwiseOr
   | BitwiseXor
   | NotEqual
+  | HeterogeneousEqual
+  | HeterogeneousNotEqual
   deriving (Eq, Ord, Show, Lift)
 
 data Expression' (ctx :: DatalogContext) =
@@ -750,7 +790,7 @@ renderExpression =
         EBinary GreaterThan e e'    -> rOp ">" e e'
         EBinary LessOrEqual e e'    -> rOp "<=" e e'
         EBinary GreaterOrEqual e e' -> rOp ">=" e e'
-        EBinary Equal e e'          -> rOp "==" e e'
+        EBinary Equal e e'          -> rOp "===" e e'
         EBinary Contains e e'       -> rm "contains" e e'
         EBinary Prefix e e'         -> rm "starts_with" e e'
         EBinary Suffix e e'         -> rm "ends_with" e e'
@@ -766,7 +806,9 @@ renderExpression =
         EBinary BitwiseAnd e e'     -> rOp "&" e e'
         EBinary BitwiseOr e e'      -> rOp "|" e e'
         EBinary BitwiseXor e e'     -> rOp "^" e e'
-        EBinary NotEqual e e'       -> rOp "!=" e e'
+        EBinary NotEqual e e'       -> rOp "!==" e e'
+        EBinary HeterogeneousEqual e e' -> rOp "==" e e'
+        EBinary HeterogeneousNotEqual e e' -> rOp "!=" e e'
 
 -- | A biscuit block, containing facts, rules and checks.
 --
@@ -1086,6 +1128,7 @@ substitutePTerm termMapping = \case
   LDate i     -> pure $ LDate i
   LBytes i    -> pure $ LBytes i
   LBool i     -> pure $ LBool i
+  LNull       -> pure LNull
   TermSet i   ->
     TermSet . Set.fromList <$> traverse (substituteSetTerm termMapping) (Set.toList i)
   Variable i  -> pure $ Variable i
@@ -1100,6 +1143,7 @@ substituteTerm termMapping = \case
   LDate i     -> pure $ LDate i
   LBytes i    -> pure $ LBytes i
   LBool i     -> pure $ LBool i
+  LNull       -> pure LNull
   TermSet i   ->
     TermSet . Set.fromList <$> traverse (substituteSetTerm termMapping) (Set.toList i)
   Variable v  -> absurd v
@@ -1114,6 +1158,7 @@ substituteSetTerm termMapping = \case
   LDate i     -> pure $ LDate i
   LBytes i    -> pure $ LBytes i
   LBool i     -> pure $ LBool i
+  LNull       -> pure LNull
   TermSet v   -> absurd v
   Variable v  -> absurd v
   Antiquote (Slice v) ->

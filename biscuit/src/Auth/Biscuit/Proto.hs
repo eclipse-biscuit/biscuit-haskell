@@ -137,6 +137,7 @@ data RuleV2 = RuleV2
 data CheckKind =
     One
   | All
+  | Reject
   deriving stock (Show, Enum, Bounded)
 
 data CheckV2 = CheckV2

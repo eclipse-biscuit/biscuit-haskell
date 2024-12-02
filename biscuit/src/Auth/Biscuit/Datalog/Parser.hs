@@ -114,9 +114,15 @@ haskellVariableParser = l $ do
   pure . maybe id T.cons leadingUS $ T.cons x xs
 
 setParser :: Parser (Set (Term' 'WithinSet 'InFact 'WithSlices))
-setParser = do
+setParser = choice [emptySetParser, nonEmptySetParser]
+
+emptySetParser :: Parser (Set (Term' 'WithinSet 'InFact 'WithSlices))
+emptySetParser = mempty <$ chunk "{,}"
+
+nonEmptySetParser :: Parser (Set (Term' 'WithinSet 'InFact 'WithSlices))
+nonEmptySetParser = do
   _ <- l $ C.char '{'
-  ts <- sepBy (termParser (forbid VarInSet variableParser) (forbid NestedSet setParser)) (l $ C.char ',')
+  ts <- sepBy1 (termParser (forbid VarInSet variableParser) (forbid NestedSet setParser)) (l $ C.char ',')
   _ <- l $ C.char '}'
   pure $ Set.fromList ts
 

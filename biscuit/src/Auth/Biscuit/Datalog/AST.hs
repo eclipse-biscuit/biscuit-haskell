@@ -367,7 +367,7 @@ renderSet :: (SliceType ctx -> Text)
           -> Set (Term' 'WithinSet 'InFact ctx)
           -> Text
 renderSet slice terms =
-  "[" <> intercalate "," (renderId' absurd absurd slice <$> Set.toList terms) <> "]"
+  "{" <> intercalate "," (renderId' absurd absurd slice <$> Set.toList terms) <> "}"
 
 renderId :: Term -> Text
 renderId = renderId' ("$" <>) (renderSet absurd) absurd

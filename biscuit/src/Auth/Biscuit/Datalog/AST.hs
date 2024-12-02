@@ -215,7 +215,7 @@ data Term' (inSet :: IsWithinSet) (pof :: PredicateOrFact) (ctx :: DatalogContex
   | Antiquote (SliceType ctx)
   -- ^ A slice (eg. @{name}@)
   | TermSet (SetType inSet ctx)
-  -- ^ A set (eg. @[true, false]@)
+  -- ^ A set (eg. @{true, false}@)
   | LNull
   -- ^ @null@
 
@@ -366,8 +366,11 @@ renderId' var set slice = \case
 renderSet :: (SliceType ctx -> Text)
           -> Set (Term' 'WithinSet 'InFact ctx)
           -> Text
-renderSet slice terms =
-  "[" <> intercalate "," (renderId' absurd absurd slice <$> Set.toList terms) <> "]"
+renderSet rslice terms =
+  if null terms
+  then "{,}"
+  else
+    "{" <> intercalate "," (renderId' absurd absurd absurd absurd rslice <$> Set.toList terms) <> "}"
 
 renderId :: Term -> Text
 renderId = renderId' ("$" <>) (renderSet absurd) absurd

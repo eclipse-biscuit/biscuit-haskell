@@ -199,7 +199,7 @@ import           Servant.Server.Experimental.Auth
 -- >          -- reachable with an admin biscuit
 -- >        . withFallbackAuthorizer [authorizer|allow if right("anon");|]
 -- >          -- ^ this policy will be tried /after/ the endpoints policies, so `endpoint3` will
--- >          -- *not* be reachable with an anon macaroon.
+-- >          -- *not* be reachable with a biscuit carrying a @right("anon")@ fact.
 -- >      handlers = handler1 :<|> handler2 :<|> handler3
 -- >   in hoistServer @ProtectedAPI Proxy handleAuth handlers
 -- >        -- ^ this will apply `handleAuth` on all 'ProtectedAPI' endpoints.

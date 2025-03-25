@@ -12,14 +12,14 @@ module Auth.Biscuit
   -- * The biscuit auth token
   -- $biscuitOverview
 
-  -- * Creating keypairs
+  -- * Creating key pairs
   -- $keypairs
     newSecret
   , toPublic
   , SecretKey
   , PublicKey
 
-  -- ** Parsing and serializing keypairs
+  -- ** Parsing and serializing key pairs
   , serializeSecretKeyHex
   , serializePublicKeyHex
   , parseSecretKeyHex
@@ -158,7 +158,7 @@ import           Auth.Biscuit.Token                  (AuthorizedBiscuit (..),
                                                       queryAuthorizerFacts,
                                                       queryRawBiscuitFacts,
                                                       seal, serializeBiscuit)
-import Auth.Biscuit.Utils                            (decodeHex, encodeHex')
+import           Auth.Biscuit.Utils                  (decodeHex, encodeHex')
 import qualified Data.Text                           as Text
 
 
@@ -178,12 +178,12 @@ import qualified Data.Text                           as Text
 --
 -- > -- Biscuit Open Verified means the token has valid signatures
 -- > -- and is open to further restriction
--- > buildToken :: Keypair -> IO (Biscuit Open Verified)
--- > buildToken keypair =
+-- > buildToken :: SecretKey -> IO (Biscuit Open Verified)
+-- > buildToken secret =
 -- >   -- the logic language has its own syntax, which can be typed directly in haskell
 -- >   -- source code thanks to QuasiQuotes. The datalog snippets are parsed at compile
 -- >   -- time, so a datalog error results in a compilation error, not a runtime error
--- >   mkBiscuit keypair [block|
+-- >   mkBiscuit secret [block|
 -- >       // the two first lines describe facts:
 -- >       // the token holder is identified as `user_1234`
 -- >       user("user_1234");
@@ -256,8 +256,8 @@ fromHex = either (fail . Text.unpack) pure . decodeHex
 -- Biscuits rely on public key cryptography: biscuits are signed with a secret key only known
 -- to the party which emits it. Verifying a biscuit, on the other hand, can be done with a
 -- public key that can be widely distributed. A private key and its corresponding public key
--- is called a keypair, but since a public key can be deterministically computed from a
--- private key, owning a private key is the same as owning a keypair.
+-- is called a key pair, but since a public key can be deterministically computed from a
+-- private key, owning a private key is the same as owning a key pair.
 
 -- | Generate a new random 'SecretKey'
 newSecret :: IO SecretKey
@@ -398,11 +398,11 @@ applyThirdPartyBlockB64 b contentsB64 = do
 -- they carry are not visible outside themselves, only their checks are evaluated.
 --
 -- Third-party blocks lift this limitation by carrying an extra signature, crafted with a
--- dedicated keypair. This way, the token authorizer (as well as blocks themselves) can
--- opt-in to trust facts coming from third-party blocks signed with specific keypairs.
+-- dedicated key pair. This way, the token authorizer (as well as blocks themselves) can
+-- opt-in to trust facts coming from third-party blocks signed with specific key pairs.
 --
 -- For instance, adding `check if group("admin") trusting {publicKey};` to a token will
--- make it usable only if it carries a third party-block signed by the corresponding keypair,
+-- make it usable only if it carries a third party-block signed by the corresponding key pair,
 -- and carrying a `group("admin")` fact.
 --
 -- Since it is not desirable to share the token with the external entity providing the third-party

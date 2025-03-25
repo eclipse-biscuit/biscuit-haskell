@@ -6,7 +6,7 @@
 {-|
   Module      : Auth.Biscuit.Proto
   Copyright   : © Clément Delafargue, 2021
-  License     : MIT
+  License     : BSD-3-Clause
   Maintainer  : clement@delafargue.name
   Haskell data structures mapping the biscuit protobuf definitions
 -}

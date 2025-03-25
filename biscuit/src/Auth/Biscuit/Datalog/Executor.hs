@@ -10,7 +10,7 @@
 {-|
   Module      : Auth.Biscuit.Datalog.Executor
   Copyright   : © Clément Delafargue, 2021
-  License     : MIT
+  License     : BSD-3-Clause
   Maintainer  : clement@delafargue.name
   The Datalog engine, tasked with deriving new facts from existing facts and rules, as well as matching available facts against checks and policies
 -}

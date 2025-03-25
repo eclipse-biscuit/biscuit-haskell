@@ -1,7 +1,7 @@
 {-|
   Module      : Auth.Biscuit.Timer
   Copyright   : © Clément Delafargue, 2021
-  License     : MIT
+  License     : BSD-3-Clause
   Maintainer  : clement@delafargue.name
   Helper function making sure an IO action runs in an alloted time
 -}

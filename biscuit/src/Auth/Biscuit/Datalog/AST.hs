@@ -20,7 +20,7 @@
 {-|
   Module      : Auth.Biscuit.Datalog.AST
   Copyright   : © Clément Delafargue, 2021
-  License     : MIT
+  License     : BSD-3-Clause
   Maintainer  : clement@delafargue.name
   The Datalog elements
 -}

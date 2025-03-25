@@ -8,7 +8,7 @@
 {-|
   Module      : Auth.Biscuit.Utils
   Copyright   : © Clément Delafargue, 2021
-  License     : MIT
+  License     : BSD-3-Clause
   Maintainer  : clement@delafargue.name
   Conversion functions between biscuit components and protobuf-encoded components
 -}

@@ -48,8 +48,7 @@ import           Data.ByteString            (ByteString)
 import           Data.Function              (on)
 import           Data.Int                   (Int32)
 import           Data.List.NonEmpty         (NonEmpty (..))
-import           Data.Maybe                 ( fromJust, fromMaybe,
-                                             isJust)
+import           Data.Maybe                 (fromJust, fromMaybe, isJust)
 import           Instances.TH.Lift          ()
 import           Language.Haskell.TH.Syntax
 

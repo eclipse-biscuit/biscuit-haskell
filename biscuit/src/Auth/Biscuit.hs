@@ -83,6 +83,9 @@ module Auth.Biscuit
   , authorizeBiscuitWithLimits
   , Limits (..)
   , defaultLimits
+  , setExternFuncs
+  , withExternFunc
+  , withExternFuncs
   , ParseError (..)
   , ExecutionError (..)
   , AuthorizedBiscuit (..)
@@ -128,7 +131,10 @@ import           Auth.Biscuit.Datalog.AST            (Authorizer, Block,
 import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
                                                       Limits (..),
                                                       MatchedQuery (..),
-                                                      defaultLimits)
+                                                      defaultLimits,
+                                                      setExternFuncs,
+                                                      withExternFunc,
+                                                      withExternFuncs)
 import           Auth.Biscuit.Datalog.Parser         (authorizer, block, query)
 import           Auth.Biscuit.Datalog.ScopedExecutor (AuthorizationSuccess (..),
                                                       getBindings,

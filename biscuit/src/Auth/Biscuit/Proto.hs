@@ -215,11 +215,12 @@ data Op =
     deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
-data UnaryKind = Negate | Parens | Length | TypeOf
+data UnaryKind = Negate | Parens | Length | TypeOf | UnaryFfi
   deriving stock (Show, Enum, Bounded)
 
-newtype OpUnary = OpUnary
-  { kind :: Required 1 (Enumeration UnaryKind)
+data OpUnary = OpUnary
+  { kind    :: Required 1 (Enumeration UnaryKind)
+  , ffiName :: Optional 2 (Value Int64)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -252,10 +253,12 @@ data BinaryKind =
   | All
   | Any
   | Get
+  | BinaryFfi
   deriving stock (Show, Enum, Bounded)
 
-newtype OpBinary = OpBinary
-  { kind :: Required 1 (Enumeration BinaryKind)
+data OpBinary = OpBinary
+  { kind    :: Required 1 (Enumeration BinaryKind)
+  , ffiName :: Optional 2 (Value Int64)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 

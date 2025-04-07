@@ -417,92 +417,75 @@ expressionToPb s e =
 pbToOp :: Symbols -> PB.Op -> Either String Op
 pbToOp s = \case
   PB.OpVValue v  -> VOp <$> pbToTerm s (PB.getField v)
-  PB.OpVUnary v  -> pure . UOp . pbToUnary $ PB.getField v
-  PB.OpVBinary v -> pure . BOp . pbToBinary $ PB.getField v
+  PB.OpVUnary v  -> UOp <$> pbToUnary s (PB.getField v)
+  PB.OpVBinary v -> BOp <$> pbToBinary s (PB.getField v)
   PB.OpVClosure v -> uncurry COp <$> pbToClosure s (PB.getField v)
 
 opToPb :: ReverseSymbols -> Op -> PB.Op
 opToPb s = \case
   VOp t -> PB.OpVValue  $ PB.putField $ termToPb s t
-  UOp o -> PB.OpVUnary  $ PB.putField $ unaryToPb o
-  BOp o -> PB.OpVBinary $ PB.putField $ binaryToPb o
+  UOp o -> PB.OpVUnary  $ PB.putField $ unaryToPb s o
+  BOp o -> PB.OpVBinary $ PB.putField $ binaryToPb s o
   COp p os -> PB.OpVClosure $ PB.putField $ closureToPb s p os
 
-pbToUnary :: PB.OpUnary -> Unary
-pbToUnary PB.OpUnary{kind} = case PB.getField kind of
-  PB.Negate -> Negate
-  PB.Parens -> Parens
-  PB.Length -> Length
-  PB.TypeOf -> TypeOf
+pbToUnary :: Symbols -> PB.OpUnary -> Either String Unary
+pbToUnary s PB.OpUnary{kind,ffiName} = case PB.getField kind of
+  PB.Negate -> Right Negate
+  PB.Parens -> Right Parens
+  PB.Length -> Right Length
+  PB.TypeOf -> Right TypeOf
+  PB.UnaryFfi -> do
+    nameIdx <- maybeToRight "Missing extern call name" $ PB.getField ffiName
+    name' <- getSymbol s $ SymbolRef nameIdx
+    pure $ UnaryFfi name'
 
-unaryToPb ::  Unary -> PB.OpUnary
-unaryToPb = PB.OpUnary . PB.putField . \case
-  Negate -> PB.Negate
-  Parens -> PB.Parens
-  Length -> PB.Length
-  TypeOf -> PB.TypeOf
+unaryToPb :: ReverseSymbols -> Unary -> PB.OpUnary
+unaryToPb s = \case
+  Negate -> PB.OpUnary { kind = PB.putField PB.Negate, ffiName = PB.putField Nothing }
+  Parens -> PB.OpUnary { kind = PB.putField PB.Parens, ffiName = PB.putField Nothing }
+  Length -> PB.OpUnary { kind = PB.putField PB.Length, ffiName = PB.putField Nothing }
+  TypeOf -> PB.OpUnary { kind = PB.putField PB.TypeOf, ffiName = PB.putField Nothing }
+  UnaryFfi name ->
+    PB.OpUnary {
+      kind = PB.putField PB.UnaryFfi,
+      ffiName = PB.putField . Just . getSymbolRef $ getSymbolCode s name
+    }
 
-pbToBinary :: PB.OpBinary -> Binary
-pbToBinary PB.OpBinary{kind} = case PB.getField kind of
-  PB.LessThan              -> LessThan
-  PB.GreaterThan           -> GreaterThan
-  PB.LessOrEqual           -> LessOrEqual
-  PB.GreaterOrEqual        -> GreaterOrEqual
-  PB.Equal                 -> Equal
-  PB.Contains              -> Contains
-  PB.Prefix                -> Prefix
-  PB.Suffix                -> Suffix
-  PB.Regex                 -> Regex
-  PB.Add                   -> Add
-  PB.Sub                   -> Sub
-  PB.Mul                   -> Mul
-  PB.Div                   -> Div
-  PB.And                   -> And
-  PB.Or                    -> Or
-  PB.Intersection          -> Intersection
-  PB.Union                 -> Union
-  PB.BitwiseAnd            -> BitwiseAnd
-  PB.BitwiseOr             -> BitwiseOr
-  PB.BitwiseXor            -> BitwiseXor
-  PB.NotEqual              -> NotEqual
-  PB.HeterogeneousEqual    -> HeterogeneousEqual
-  PB.HeterogeneousNotEqual -> HeterogeneousNotEqual
-  PB.LazyAnd               -> LazyAnd
-  PB.LazyOr                -> LazyOr
-  PB.All                   -> All
-  PB.Any                   -> Any
-  PB.Get                   -> Get
-
-binaryToPb :: Binary -> PB.OpBinary
-binaryToPb = PB.OpBinary . PB.putField . \case
-  LessThan       -> PB.LessThan
-  GreaterThan    -> PB.GreaterThan
-  LessOrEqual    -> PB.LessOrEqual
-  GreaterOrEqual -> PB.GreaterOrEqual
-  Equal          -> PB.Equal
-  Contains       -> PB.Contains
-  Prefix         -> PB.Prefix
-  Suffix         -> PB.Suffix
-  Regex          -> PB.Regex
-  Add            -> PB.Add
-  Sub            -> PB.Sub
-  Mul            -> PB.Mul
-  Div            -> PB.Div
-  And            -> PB.And
-  Or             -> PB.Or
-  Intersection   -> PB.Intersection
-  Union          -> PB.Union
-  BitwiseAnd     -> PB.BitwiseAnd
-  BitwiseOr      -> PB.BitwiseOr
-  BitwiseXor     -> PB.BitwiseXor
-  NotEqual       -> PB.NotEqual
-  HeterogeneousEqual -> PB.HeterogeneousEqual
-  HeterogeneousNotEqual -> PB.HeterogeneousNotEqual
-  LazyAnd -> PB.LazyAnd
-  LazyOr  -> PB.LazyOr
-  All     -> PB.All
-  Any     -> PB.Any
-  Get     -> PB.Get
+pbToBinary :: Symbols -> PB.OpBinary -> Either String Binary
+pbToBinary s PB.OpBinary{kind, ffiName} =
+  case PB.getField kind of
+        PB.LessThan              -> Right LessThan
+        PB.GreaterThan           -> Right GreaterThan
+        PB.LessOrEqual           -> Right LessOrEqual
+        PB.GreaterOrEqual        -> Right GreaterOrEqual
+        PB.Equal                 -> Right Equal
+        PB.Contains              -> Right Contains
+        PB.Prefix                -> Right Prefix
+        PB.Suffix                -> Right Suffix
+        PB.Regex                 -> Right Regex
+        PB.Add                   -> Right Add
+        PB.Sub                   -> Right Sub
+        PB.Mul                   -> Right Mul
+        PB.Div                   -> Right Div
+        PB.And                   -> Right And
+        PB.Or                    -> Right Or
+        PB.Intersection          -> Right Intersection
+        PB.Union                 -> Right Union
+        PB.BitwiseAnd            -> Right BitwiseAnd
+        PB.BitwiseOr             -> Right BitwiseOr
+        PB.BitwiseXor            -> Right BitwiseXor
+        PB.NotEqual              -> Right NotEqual
+        PB.HeterogeneousEqual    -> Right HeterogeneousEqual
+        PB.HeterogeneousNotEqual -> Right HeterogeneousNotEqual
+        PB.LazyAnd               -> Right LazyAnd
+        PB.LazyOr                -> Right LazyOr
+        PB.All                   -> Right All
+        PB.Any                   -> Right Any
+        PB.Get                   -> Right Get
+        PB.BinaryFfi -> do
+          nameIdx <- maybeToRight "Missing extern call name" $ PB.getField ffiName
+          name' <- getSymbol s $ SymbolRef nameIdx
+          pure $ BinaryFfi name'
 
 pbToClosure :: Symbols -> PB.OpClosure -> Either String ([T.Text], [Op])
 pbToClosure s PB.OpClosure{..} =
@@ -515,6 +498,41 @@ closureToPb s params' ops' =
   let params = PB.putField $ fmap (getSymbolRef . getSymbolCode s) params'
       ops = PB.putField $ fmap (opToPb s) ops'
    in PB.OpClosure{..}
+
+binaryToPb :: ReverseSymbols -> Binary -> PB.OpBinary
+binaryToPb s = \case
+  LessThan       -> PB.OpBinary { kind = PB.putField PB.LessThan, ffiName = PB.putField Nothing }
+  GreaterThan    -> PB.OpBinary { kind = PB.putField PB.GreaterThan, ffiName = PB.putField Nothing }
+  LessOrEqual    -> PB.OpBinary { kind = PB.putField PB.LessOrEqual, ffiName = PB.putField Nothing }
+  GreaterOrEqual -> PB.OpBinary { kind = PB.putField PB.GreaterOrEqual, ffiName = PB.putField Nothing }
+  Equal          -> PB.OpBinary { kind = PB.putField PB.Equal, ffiName = PB.putField Nothing }
+  Contains       -> PB.OpBinary { kind = PB.putField PB.Contains, ffiName = PB.putField Nothing }
+  Prefix         -> PB.OpBinary { kind = PB.putField PB.Prefix, ffiName = PB.putField Nothing }
+  Suffix         -> PB.OpBinary { kind = PB.putField PB.Suffix, ffiName = PB.putField Nothing }
+  Regex          -> PB.OpBinary { kind = PB.putField PB.Regex, ffiName = PB.putField Nothing }
+  Add            -> PB.OpBinary { kind = PB.putField PB.Add, ffiName = PB.putField Nothing }
+  Sub            -> PB.OpBinary { kind = PB.putField PB.Sub, ffiName = PB.putField Nothing }
+  Mul            -> PB.OpBinary { kind = PB.putField PB.Mul, ffiName = PB.putField Nothing }
+  Div            -> PB.OpBinary { kind = PB.putField PB.Div, ffiName = PB.putField Nothing }
+  And            -> PB.OpBinary { kind = PB.putField PB.And, ffiName = PB.putField Nothing }
+  Or             -> PB.OpBinary { kind = PB.putField PB.Or, ffiName = PB.putField Nothing }
+  Intersection   -> PB.OpBinary { kind = PB.putField PB.Intersection, ffiName = PB.putField Nothing }
+  Union          -> PB.OpBinary { kind = PB.putField PB.Union, ffiName = PB.putField Nothing }
+  BitwiseAnd     -> PB.OpBinary { kind = PB.putField PB.BitwiseAnd, ffiName = PB.putField Nothing }
+  BitwiseOr      -> PB.OpBinary { kind = PB.putField PB.BitwiseOr, ffiName = PB.putField Nothing }
+  BitwiseXor     -> PB.OpBinary { kind = PB.putField PB.BitwiseXor, ffiName = PB.putField Nothing }
+  NotEqual       -> PB.OpBinary { kind = PB.putField PB.NotEqual, ffiName = PB.putField Nothing }
+  HeterogeneousEqual -> PB.OpBinary { kind = PB.putField PB.HeterogeneousEqual, ffiName = PB.putField Nothing }
+  HeterogeneousNotEqual -> PB.OpBinary { kind = PB.putField PB.HeterogeneousNotEqual, ffiName = PB.putField Nothing }
+  LazyAnd ->PB.OpBinary { kind = PB.putField PB.LazyAnd, ffiName = PB.putField Nothing }
+  LazyOr -> PB.OpBinary { kind = PB.putField PB.LazyOr, ffiName = PB.putField Nothing }
+  Any -> PB.OpBinary { kind = PB.putField PB.Any, ffiName = PB.putField Nothing }
+  All -> PB.OpBinary { kind = PB.putField PB.All, ffiName = PB.putField Nothing }
+  Get -> PB.OpBinary { kind = PB.putField PB.Get, ffiName = PB.putField Nothing }
+  BinaryFfi n -> PB.OpBinary
+    { kind = PB.putField PB.BinaryFfi
+    , ffiName = PB.putField . Just . getSymbolRef $ getSymbolCode s n
+    }
 
 pbToThirdPartyBlockRequest :: PB.ThirdPartyBlockRequest -> Either String Crypto.Signature
 pbToThirdPartyBlockRequest PB.ThirdPartyBlockRequest{legacyPk, pkTable, prevSig} = do

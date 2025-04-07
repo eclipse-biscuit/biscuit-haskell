@@ -330,6 +330,19 @@ constraints = testGroup "Parse expressions"
                     (EValue $ TermSet [LInteger 2])
                  )
               )
+  , testCase "unary extern method call" $
+      parseExpression "$var.extern::test() == true" @?=
+        Right (EBinary HeterogeneousEqual
+                (EUnary (UnaryFfi "test") (EValue $ Variable "var"))
+                (EValue $ LBool True))
+  , testCase "binary extern method call" $
+      parseExpression "$var.extern::test(1) == true" @?=
+        Right (EBinary HeterogeneousEqual
+                (EBinary
+                  (BinaryFfi "test")
+                  (EValue $ Variable "var")
+                  (EValue $ LInteger 1))
+                  (EValue $ LBool True))
   , testCase "nullary closures" $
       parseExpression "true || 1 === 2" @?=
         Right (EBinary LazyOr

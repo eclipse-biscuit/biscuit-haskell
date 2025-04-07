@@ -800,6 +800,7 @@ data Unary =
   | Parens
   | Length
   | TypeOf
+  | UnaryFfi Text
   deriving (Eq, Ord, Show, Lift)
 
 data Binary =
@@ -831,6 +832,7 @@ data Binary =
   | All
   | Any
   | Get
+  | BinaryFfi Text
   deriving (Eq, Ord, Show, Lift)
 
 data Expression' (ctx :: DatalogContext) =
@@ -905,6 +907,7 @@ renderExpression =
         EUnary Parens e             -> "(" <> renderExpression e <> ")"
         EUnary Length e             -> renderExpression e <> ".length()"
         EUnary TypeOf e             -> renderExpression e <> ".type()"
+        EUnary (UnaryFfi n) e       -> renderExpression e <> ".extern::" <> n <> "()"
         EBinary LessThan e e'       -> rOp "<" e e'
         EBinary GreaterThan e e'    -> rOp ">" e e'
         EBinary LessOrEqual e e'    -> rOp "<=" e e'
@@ -933,6 +936,7 @@ renderExpression =
         EBinary All e e'            -> rm "all" e e'
         EBinary Any e e'            -> rm "any" e e'
         EBinary Get e e'            -> rm "get" e e'
+        EBinary (BinaryFfi n) e e'  -> rm ("extern::" <> n) e e'
         EClosure ps e               -> rC ps e
 
 -- | A biscuit block, containing facts, rules and checks.

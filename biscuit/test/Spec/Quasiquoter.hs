@@ -1,6 +1,10 @@
 {-# LANGUAGE OverloadedLists   #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes       #-}
+{-
+  Copyright   : © Clément Delafargue, 2021
+  License     : BSD-3-Clause
+-}
 module Spec.Quasiquoter (specs) where
 
 import           Data.Text                   (Text)

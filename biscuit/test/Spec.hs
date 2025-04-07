@@ -1,3 +1,7 @@
+{-
+  Copyright   : © Clément Delafargue, 2021
+  License     : BSD-3-Clause
+-}
 module Main (main) where
 
 import           Test.Tasty

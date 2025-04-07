@@ -1,6 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes       #-}
 {-# LANGUAGE RecordWildCards   #-}
+{-
+  Copyright   : © Clément Delafargue, 2021
+  License     : BSD-3-Clause
+-}
 module Spec.Verification
   ( specs
   ) where

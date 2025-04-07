@@ -3,6 +3,10 @@
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE RecordWildCards       #-}
 {- HLINT ignore "Reduce duplication" -}
+{-
+  Copyright   : © Clément Delafargue, 2021
+  License     : BSD-3-Clause
+-}
 module Spec.NewCrypto (specs) where
 
 import           Data.ByteString     (ByteString)

@@ -10,6 +10,10 @@
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE RecordWildCards       #-}
 {-# LANGUAGE TypeApplications      #-}
+{-
+  Copyright   : © Clément Delafargue, 2021
+  License     : BSD-3-Clause
+-}
 module Spec.SampleReader where
 
 import           Control.Arrow                 ((&&&))

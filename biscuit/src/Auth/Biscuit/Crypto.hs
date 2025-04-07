@@ -5,6 +5,13 @@
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE TypeApplications           #-}
+{-|
+  Module      : Auth.Biscuit.Crypto
+  Copyright   : © Clément Delafargue, 2021
+  License     : BSD-3-Clause
+  Maintainer  : clement@delafargue.name
+  Cryptographic helpers for biscuit signatures
+-}
 module Auth.Biscuit.Crypto
   ( SignedBlock
   , Blocks

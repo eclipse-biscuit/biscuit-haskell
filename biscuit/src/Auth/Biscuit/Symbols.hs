@@ -3,6 +3,13 @@
 {-# LANGUAGE NamedFieldPuns             #-}
 {-# LANGUAGE OverloadedLists            #-}
 {-# LANGUAGE OverloadedStrings          #-}
+{-|
+  Module      : Auth.Biscuit.Symbols
+  Copyright   : © Clément Delafargue, 2021
+  License     : BSD-3-Clause
+  Maintainer  : clement@delafargue.name
+  Symbol management logic for biscuit serialization
+-}
 module Auth.Biscuit.Symbols
   ( Symbols
   , BlockSymbols

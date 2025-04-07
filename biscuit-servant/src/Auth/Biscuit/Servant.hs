@@ -5,6 +5,13 @@
 {-# LANGUAGE RankNTypes        #-}
 {-# LANGUAGE RecordWildCards   #-}
 {-# LANGUAGE TypeFamilies      #-}
+{-|
+  Module      : Auth.Biscuit.Datalog.AST
+  Copyright   : © Clément Delafargue, 2021
+  License     : BSD-3-Clause
+  Maintainer  : clement@delafargue.name
+  Servant support for biscuit
+-}
 module Auth.Biscuit.Servant
   (
   -- * Protecting a servant API with biscuits

@@ -43,6 +43,7 @@ import           Test.Tasty.HUnit
 
 import           Auth.Biscuit
 import           Auth.Biscuit.Datalog.AST      (renderAuthorizer, renderBlock)
+import qualified Auth.Biscuit.Datalog.AST      as AST
 import           Auth.Biscuit.Datalog.Executor (ExecutionError (..),
                                                 ResultError (..))
 import           Auth.Biscuit.Datalog.Parser   (authorizerParser, blockParser)
@@ -229,7 +230,7 @@ processTestCase :: (String -> IO ())
                 -> Assertion
 processTestCase step rootPk TestCase{..}
   | fst filename == "test018_unbound_variables_in_rule.bc" = step "Skipping for now (unbound variables are now caught before evaluation)"
-  | fst filename `elem` ["test035_ffi.bc", "test036_secp256r1.bc", "test037_secp256r1_third_party.bc", "test038_try_op.bc"] = step "Skipping for now (not supported yet)"
+  | fst filename `elem` ["test036_secp256r1.bc", "test037_secp256r1_third_party.bc", "test038_try_op.bc"] = step "Skipping for now (not supported yet)"
   | otherwise = do
     step "Parsing "
     let vList = Map.toList validations
@@ -303,7 +304,14 @@ processValidation step b (name, ValidationR{..}) = do
   let w = fold world
   pols <- either (assertFailure . show) pure $ parseAuthorizer $ foldMap (<> ";") (policies w)
   authorizer <- either (assertFailure . show)  pure $ parseAuthorizer authorizer_code
-  res <- authorizeBiscuit b (authorizer <> pols)
+  let testfn :: AST.Value -> Maybe AST.Value -> Either String AST.Value
+      testfn v Nothing = Right v
+      testfn (LString x) (Just (LString y))
+        | x == y = Right $ LString "equal strings"
+        | otherwise = Right $ LString "different strings"
+      testfn _ _ = Left "unsupported operands"
+  let limits = withExternFunc "test" testfn defaultLimits
+  res <- authorizeBiscuitWithLimits limits b (authorizer <> pols)
   checkResult compareExecErrors result res
   let revocationIds = encodeHex <$> toList (getRevocationIds b)
   step "Comparing revocation ids"

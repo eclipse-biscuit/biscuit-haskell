@@ -101,9 +101,12 @@ forbid mkError p = do
   (sp, _) <- getSpan p
   registerError mkError sp
 
+identifierParser :: Parser Text
+identifierParser = takeWhile1P (Just "_, :, or any alphanumeric char") (\c -> c == '_' || c == ':' || isAlphaNum c)
+
 variableParser :: Parser Text
 variableParser =
-  C.char '$' *> takeWhile1P (Just "_, :, or any alphanumeric char") (\c -> c == '_' || c == ':' || isAlphaNum c)
+  C.char '$' *> identifierParser
 
 haskellVariableParser :: Parser Text
 haskellVariableParser = l $ do
@@ -349,6 +352,7 @@ binaryMethodParser = do
     , Any          <$ chunk "any"
     , All          <$ chunk "all"
     , Get          <$ chunk "get"
+    , BinaryFfi    <$> (chunk "extern::" *> identifierParser)
     ]
   _ <- l $ C.char '('
   e2 <- case method of
@@ -364,6 +368,7 @@ unaryMethodParser = do
   method <- choice
             [ Length <$ chunk "length"
             , TypeOf <$ chunk "type"
+            , UnaryFfi <$> (chunk "extern::" *> identifierParser)
             ]
   _ <- l $ chunk "()"
   pure $ EUnary method

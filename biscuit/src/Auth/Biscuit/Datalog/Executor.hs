@@ -20,6 +20,8 @@ module Auth.Biscuit.Datalog.Executor
   , ResultError (..)
   , Bindings
   , Name
+  , ExternFuncs
+  , ExternFunc (..)
   , MatchedQuery (..)
   , Scoped
   , FactGroup (..)
@@ -28,6 +30,9 @@ module Auth.Biscuit.Datalog.Executor
   , fromScopedFacts
   , keepAuthorized'
   , defaultLimits
+  , setExternFuncs
+  , withExternFunc
+  , withExternFuncs
   , evaluateExpression
   --
   , getFactsForRule
@@ -69,6 +74,21 @@ type Name = Text
 
 -- | A list of bound variables, with the associated value
 type Bindings  = Map Name Value
+
+newtype ExternFunc = ExternFunc (Value -> Maybe Value -> Either String Value)
+
+instance Show ExternFunc where
+  show _ = "<extern func>"
+
+instance Eq ExternFunc where
+  _ == _ = True
+
+type ExternFuncs = Map Text ExternFunc
+
+runExternFunc :: ExternFuncs -> Text -> Value -> Maybe Value -> Either String Value
+runExternFunc ef name a1 a2 = do
+  ExternFunc func <- maybeToRight ("undefined external func " <> unpack name) $ ef !? name
+  func a1 a2
 
 -- | A datalog query that was matched, along with the values
 -- that matched
@@ -124,6 +144,7 @@ data Limits
   , allowRegexes  :: Bool
   -- ^ whether or not allowing `.matches()` during verification (untrusted regex computation
   -- can enable DoS attacks). This security risk is mitigated by the 'maxTime' setting.
+  , externFuncs   :: ExternFuncs
   }
   deriving (Eq, Show)
 
@@ -132,14 +153,23 @@ data Limits
 --   - 100 iterations
 --   - 1000μs max
 --   - regexes are allowed
---   - facts and rules are allowed in blocks
 defaultLimits :: Limits
 defaultLimits = Limits
   { maxFacts = 1000
   , maxIterations = 100
   , maxTime = 1000
   , allowRegexes = True
+  , externFuncs = mempty
   }
+
+withExternFunc :: Text -> (Value -> Maybe Value -> Either String Value) -> Limits -> Limits
+withExternFunc n f l@Limits{externFuncs} = l { externFuncs = Map.insert n (ExternFunc f) externFuncs }
+
+withExternFuncs :: Map Text (Value -> Maybe Value -> Either String Value) -> Limits -> Limits
+withExternFuncs fs l@Limits{externFuncs} = l { externFuncs = Map.union (ExternFunc <$> fs) externFuncs }
+
+setExternFuncs :: Map Text (Value -> Maybe Value -> Either String Value) -> Limits -> Limits
+setExternFuncs fs l = l { externFuncs = ExternFunc <$> fs }
 
 type Scoped a = (Set Natural, a)
 
@@ -389,27 +419,28 @@ applyVariable bindings = \case
   TermMap t   -> Right $ TermMap t
   Antiquote v -> absurd v
 
-evalUnary :: Unary -> Value -> Either String Value
-evalUnary Parens t = pure t
-evalUnary Negate (LBool b) = pure (LBool $ not b)
-evalUnary Negate _ = Left "Only booleans support negation"
-evalUnary Length (LString t) = pure . LInteger . fromIntegral $ ByteString.length $ Text.encodeUtf8 t
-evalUnary Length (LBytes bs) = pure . LInteger . fromIntegral $ ByteString.length bs
-evalUnary Length (TermSet s) = pure . LInteger . fromIntegral $ Set.size s
-evalUnary Length (TermArray s) = pure . LInteger . fromIntegral $ length s
-evalUnary Length (TermMap s) = pure . LInteger . fromIntegral $ Map.size s
-evalUnary Length _ = Left "Only strings, bytes, sets, arrays and maps support `.length()`"
-evalUnary TypeOf (LInteger _) = pure . LString $ "integer"
-evalUnary TypeOf (LString _) = pure . LString $ "string"
-evalUnary TypeOf (LDate _) = pure . LString $ "date"
-evalUnary TypeOf (LBytes _) = pure . LString $ "bytes"
-evalUnary TypeOf (LBool _) = pure . LString $ "bool"
-evalUnary TypeOf (TermSet _) = pure . LString $ "set"
-evalUnary TypeOf (TermArray _) = pure . LString $ "array"
-evalUnary TypeOf (TermMap _) = pure . LString $ "map"
-evalUnary TypeOf LNull = pure . LString $ "null"
-evalUnary TypeOf (Variable v) = absurd v
-evalUnary TypeOf (Antiquote v) = absurd v
+evalUnary :: Limits -> Unary -> Value -> Either String Value
+evalUnary _ Parens t = pure t
+evalUnary _ Negate (LBool b) = pure (LBool $ not b)
+evalUnary _ Negate _ = Left "Only booleans support negation"
+evalUnary _ Length (LString t) = pure . LInteger . fromIntegral $ ByteString.length $ Text.encodeUtf8 t
+evalUnary _ Length (LBytes bs) = pure . LInteger . fromIntegral $ ByteString.length bs
+evalUnary _ Length (TermSet s) = pure . LInteger . fromIntegral $ Set.size s
+evalUnary _ Length (TermArray s) = pure . LInteger . fromIntegral $ length s
+evalUnary _ Length (TermMap s) = pure . LInteger . fromIntegral $ Map.size s
+evalUnary _ Length _ = Left "Only strings, bytes, sets, arrays and maps support `.length()`"
+evalUnary _ TypeOf (LInteger _) = pure . LString $ "integer"
+evalUnary _ TypeOf (LString _) = pure . LString $ "string"
+evalUnary _ TypeOf (LDate _) = pure . LString $ "date"
+evalUnary _ TypeOf (LBytes _) = pure . LString $ "bytes"
+evalUnary _ TypeOf (LBool _) = pure . LString $ "bool"
+evalUnary _ TypeOf (TermSet _) = pure . LString $ "set"
+evalUnary _ TypeOf (TermArray _) = pure . LString $ "array"
+evalUnary _ TypeOf (TermMap _) = pure . LString $ "map"
+evalUnary _ TypeOf LNull = pure . LString $ "null"
+evalUnary _ TypeOf (Variable v) = absurd v
+evalUnary _ TypeOf (Antiquote v) = absurd v
+evalUnary Limits{externFuncs} (UnaryFfi n) v = runExternFunc externFuncs n v Nothing
 
 evalBinary :: Limits -> Binary -> Value -> Value -> Either String Value
 -- eq / ord operations
@@ -504,6 +535,7 @@ evalBinary _ Get (TermMap t) (LString s) = pure . fromMaybe LNull $ t !? StringK
 evalBinary _ Get _ _ = Left "Only arrays and maps support `.get()`"
 evalBinary _ Any _ _ = Left "internal error: leftover .any()"
 evalBinary _ All _ _ = Left "internal error: leftover .all()"
+evalBinary Limits{externFuncs} (BinaryFfi n) l r = runExternFunc externFuncs n l (Just r)
 
 checkedOp :: (Integer -> Integer -> Integer)
           -> Int64 -> Int64
@@ -612,7 +644,7 @@ evaluateExpression :: Limits
                    -> Either String Value
 evaluateExpression l b = \case
     EValue term -> applyVariable b term
-    EUnary op e -> evalUnary op =<< evaluateExpression l b e
+    EUnary op e -> evalUnary l op =<< evaluateExpression l b e
     EBinary LazyAnd e e' -> do
         lhs <- evaluateExpression l b e
         evaluateLazyAnd l b lhs e'

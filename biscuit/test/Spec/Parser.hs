@@ -2,6 +2,10 @@
 {-# LANGUAGE OverloadedLists   #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
+{-
+  Copyright   : © Clément Delafargue, 2021
+  License     : BSD-3-Clause
+-}
 module Spec.Parser (specs, parseExpression, parseBlock, parseAuthorizer) where
 
 import           Control.Monad               ((<=<))

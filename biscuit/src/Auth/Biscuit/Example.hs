@@ -1,5 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes       #-}
+{-|
+  Module      : Auth.Biscuit.Example
+  Copyright   : © Clément Delafargue, 2021
+  License     : BSD-3-Clause
+  Maintainer  : clement@delafargue.name
+  Working examples of biscuit-haskell
+-}
 module Auth.Biscuit.Example where
 
 import           Data.ByteString (ByteString)

@@ -8,6 +8,13 @@
 {-# LANGUAGE QuasiQuotes                #-}
 {-# LANGUAGE RecordWildCards            #-}
 {-# LANGUAGE TupleSections              #-}
+{-|
+  Module      : Auth.Biscuit.Datalog.Executor
+  Copyright   : © Clément Delafargue, 2021
+  License     : BSD-3-Clause
+  Maintainer  : clement@delafargue.name
+  Wrapper for the executor engine that makes sure facts are properly scoped
+-}
 module Auth.Biscuit.Datalog.ScopedExecutor
   ( BlockWithRevocationId
   , runAuthorizer

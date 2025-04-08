@@ -1,6 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes       #-}
 {- HLINT ignore "Reduce duplication" -}
+{-
+  Copyright   : © Clément Delafargue, 2021
+  License     : BSD-3-Clause
+-}
 module Spec.ScopedExecutor (specs) where
 
 import           Control.Arrow                       ((&&&))

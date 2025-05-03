@@ -114,10 +114,16 @@ haskellVariableParser = l $ do
   pure . maybe id T.cons leadingUS $ T.cons x xs
 
 setParser :: Parser (Set (Term' 'WithinSet 'InFact 'WithSlices))
-setParser = do
-  _ <- l $ C.char '['
-  ts <- sepBy (termParser (forbid VarInSet variableParser) (forbid NestedSet setParser)) (l $ C.char ',')
-  _ <- l $ C.char ']'
+setParser = choice [emptySetParser, nonEmptySetParser]
+
+emptySetParser :: Parser (Set (Term' 'WithinSet 'InFact 'WithSlices))
+emptySetParser = mempty <$ chunk "{,}"
+
+nonEmptySetParser :: Parser (Set (Term' 'WithinSet 'InFact 'WithSlices))
+nonEmptySetParser = do
+  _ <- l $ C.char '{'
+  ts <- sepBy1 (termParser (forbid VarInSet variableParser) (forbid NestedSet setParser)) (l $ C.char ',')
+  _ <- l $ C.char '}'
   pure $ Set.fromList ts
 
 factTermParser :: Parser (Term' 'NotWithinSet 'InFact 'WithSlices)
@@ -132,9 +138,9 @@ termParser :: Parser (VariableType inSet pof)
            -> Parser (SetType inSet 'WithSlices)
            -> Parser (Term' inSet pof 'WithSlices)
 termParser parseVar parseSet = l $ choice
-  [ Antiquote . Slice <$> haskellVariableParser <?> "parameter (eg. {paramName})"
+  [ TermSet <$> try parseSet <?> "set (eg. {1,2,3})"
+  , Antiquote . Slice <$> haskellVariableParser <?> "parameter (eg. {paramName})"
   , Variable <$> parseVar <?> "datalog variable (eg. $variable)"
-  , TermSet <$> parseSet <?> "set (eg. [1,2,3])"
   , LBytes <$> (chunk "hex:" *> hexParser) <?> "hex-encoded bytestring (eg. hex:00ff99)"
   , LDate <$> rfc3339DateParser <?> "RFC3339-formatted timestamp (eg. 2022-11-29T00:00:00Z)"
   , LInteger <$> intParser <?> "(signed) integer"
@@ -143,6 +149,7 @@ termParser parseVar parseSet = l $ choice
                      , False <$ chunk "false"
                      ]
           <?> "boolean value (eg. true or false)"
+  , LNull <$ chunk "null" <?> "null value"
   ]
 
 intParser :: Parser Int64
@@ -261,8 +268,10 @@ table =
         , infixN  ">=" GreaterOrEqual
         , infixN  "<"  LessThan
         , infixN  ">"  GreaterThan
-        , infixN  "==" Equal
-        , infixN  "!=" NotEqual
+        , infixN  "===" Equal
+        , infixN  "!==" NotEqual
+        , infixN  "==" HeterogeneousEqual
+        , infixN  "!=" HeterogeneousNotEqual
         ]
       , [ infixL "&&" And ]
       , [ infixL "||" Or ]
@@ -364,6 +373,7 @@ checkParser :: Bool -> Parser (Check' 'Repr 'WithSlices)
 checkParser inAuthorizer = do
   cKind <- l $ choice [ One <$ chunk "check if"
                       , All <$ chunk "check all"
+                      , Reject <$ chunk "reject if"
                       ]
   cQueries <- queryParser inAuthorizer
   pure Check{..}

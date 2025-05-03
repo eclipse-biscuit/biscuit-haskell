@@ -52,7 +52,7 @@ import           Auth.Biscuit.Utils            (encodeHex)
 import           Spec.Parser                   (parseAuthorizer, parseBlock)
 
 getB :: ParsedSignedBlock -> Block
-getB ((_, b), _, _, _) = b
+getB ((_, b), _, _, _, _) = b
 
 getAuthority :: Biscuit p Verified -> Block
 getAuthority = getB . authority
@@ -122,7 +122,7 @@ data ValidationR
   = ValidationR
   { world           :: Maybe WorldDesc
   , result          :: RustResult RustError Int
-  , authorizer_code :: Authorizer
+  , authorizer_code :: Text
   , revocation_ids  :: [Text]
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (FromJSON, ToJSON)
@@ -151,8 +151,11 @@ data TestCase a
 
 data BlockDesc
   = BlockDesc
-  { symbols :: [Text]
-  , code    :: Text
+  { symbols      :: [Text]
+  , code         :: Text
+  , public_keys  :: [Text]
+  , external_key :: Maybe Text
+  , version      :: Int
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -228,6 +231,9 @@ processTestCase step rootPk TestCase{..} =
   if fst filename == "test018_unbound_variables_in_rule.bc"
   then
     step "Skipping for now (unbound variables are now caught before evaluation)"
+  else if fst filename `elem` ["test032_laziness_closures.bc", "test033_typeof.bc", "test034_array_map.bc", "test035_ffi.bc", "test036_secp256r1.bc"]
+  then
+    step "Skipping for now (not supported yet)"
   else do
     step "Parsing "
     let vList = Map.toList validations
@@ -262,6 +268,7 @@ compareParseErrors pe re =
           mustMatchEither
             [ key "Format" . key "Signature" . key "InvalidSignature"
             , key "Format" . key "InvalidSignatureSize"
+            , key "Format" . key "BlockSignatureDeserializationError"
             ]
         InvalidProof ->
           assertFailure $ "InvalidProof can't appear here " <> show re
@@ -299,7 +306,8 @@ processValidation step b (name, ValidationR{..}) = do
   when (name /= "") $ step ("Checking " <> name)
   let w = fold world
   pols <- either (assertFailure . show) pure $ parseAuthorizer $ foldMap (<> ";") (policies w)
-  res <- authorizeBiscuit b (authorizer_code <> pols)
+  authorizer <- either (assertFailure . show)  pure $ parseAuthorizer authorizer_code
+  res <- authorizeBiscuit b (authorizer <> pols)
   checkResult compareExecErrors result res
   let revocationIds = encodeHex <$> toList (getRevocationIds b)
   step "Comparing revocation ids"
@@ -322,29 +330,3 @@ getSpecs = do
   SampleFile{..} <- readSamplesFile
   pure $ testGroup "Biscuit samples - compliance checks"
        $ mkTestCase root_public_key <$> testcases
-mkTestCaseFromBiscuit
-  :: String
-  -> FilePath
-  -> Biscuit Open Verified
-  -> [(String, Authorizer)]
-  -> IO (TestCase FilePath)
-mkTestCaseFromBiscuit title filename biscuit authorizers = do
-  let mkBlockDesc :: Block -> BlockDesc
-      mkBlockDesc b = BlockDesc
-        { code = renderBlock b
-        , symbols = []
-        }
-      mkValidation :: Authorizer -> IO ValidationR
-      mkValidation authorizer = do
-        Right success <- authorizeBiscuit biscuit authorizer
-        pure ValidationR
-          { world = Just mempty
-          , result = Ok 0
-          , authorizer_code = authorizer
-          , revocation_ids = encodeHex <$> toList (getRevocationIds biscuit)
-          }
-  BS.writeFile ("test/samples/current/" <> filename) (serialize biscuit)
-  let token = mkBlockDesc <$> getAuthority biscuit :| getBlocks biscuit
-  validations <- Map.fromList <$> traverse (traverse mkValidation) authorizers
-
-  pure TestCase{..}

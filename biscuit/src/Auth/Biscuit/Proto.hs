@@ -29,6 +29,7 @@ module Auth.Biscuit.Proto
   , TermV2 (..)
   , ExpressionV2 (..)
   , TermSet (..)
+  , Empty (..)
   , Op (..)
   , OpUnary (..)
   , UnaryKind (..)
@@ -83,6 +84,7 @@ data SignedBlock = SignedBlock
   , nextKey     :: Required 2 (Message PublicKey)
   , signature   :: Required 3 (Value ByteString)
   , externalSig :: Optional 4 (Message ExternalSig)
+  , version     :: Optional 5 (Value Int32)
   }
   deriving (Generic, Show)
   deriving anyclass (Decode, Encode)
@@ -136,6 +138,7 @@ data RuleV2 = RuleV2
 data CheckKind =
     One
   | All
+  | Reject
   deriving stock (Show, Enum, Bounded)
 
 data CheckV2 = CheckV2
@@ -158,6 +161,11 @@ data TermV2 =
   | TermBytes    (Required 5 (Value ByteString))
   | TermBool     (Required 6 (Value Bool))
   | TermTermSet  (Required 7 (Message TermSet))
+  | TermNull     (Required 8 (Message Empty))
+    deriving stock (Generic, Show)
+    deriving anyclass (Decode, Encode)
+
+data Empty = Empty {}
     deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -209,6 +217,8 @@ data BinaryKind =
   | BitwiseOr
   | BitwiseXor
   | NotEqual
+  | HeterogeneousEqual
+  | HeterogeneousNotEqual
   deriving stock (Show, Enum, Bounded)
 
 newtype OpBinary = OpBinary
@@ -253,8 +263,9 @@ decodeThirdPartyBlockContents = runGet decodeMessage
 
 data ThirdPartyBlockRequest
   = ThirdPartyBlockRequest
-  { previousPk :: Required 1 (Message PublicKey)
-  , pkTable    :: Repeated 2 (Message PublicKey)
+  { legacyPk :: Optional 1 (Message PublicKey)
+  , pkTable  :: Repeated 2 (Message PublicKey)
+  , prevSig  :: Required 3 (Value ByteString)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 

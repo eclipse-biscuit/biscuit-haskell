@@ -231,7 +231,7 @@ processTestCase step rootPk TestCase{..} =
   if fst filename == "test018_unbound_variables_in_rule.bc"
   then
     step "Skipping for now (unbound variables are now caught before evaluation)"
-  else if fst filename `elem` ["test032_laziness_closures.bc", "test033_typeof.bc", "test034_array_map.bc", "test035_ffi.bc", "test036_secp256r1.bc", "test037_secp256r1_third_party.bc", "test038_try_op.bc"]
+  else if fst filename `elem` ["test033_typeof.bc", "test034_array_map.bc", "test035_ffi.bc", "test036_secp256r1.bc", "test037_secp256r1_third_party.bc", "test038_try_op.bc"]
   then
     step "Skipping for now (not supported yet)"
   else do

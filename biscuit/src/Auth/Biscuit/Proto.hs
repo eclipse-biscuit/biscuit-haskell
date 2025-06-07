@@ -35,8 +35,7 @@ module Auth.Biscuit.Proto
   , UnaryKind (..)
   , OpBinary (..)
   , BinaryKind (..)
-  , OpTernary (..)
-  , TernaryKind (..)
+  , OpClosure (..)
   , ThirdPartyBlockContents (..)
   , ThirdPartyBlockRequest (..)
   , getField
@@ -136,8 +135,8 @@ data RuleV2 = RuleV2
     deriving anyclass (Decode, Encode)
 
 data CheckKind =
-    One
-  | All
+    CheckOne
+  | CheckAll
   | Reject
   deriving stock (Show, Enum, Bounded)
 
@@ -184,6 +183,7 @@ data Op =
     OpVValue  (Required 1 (Message TermV2))
   | OpVUnary  (Required 2 (Message OpUnary))
   | OpVBinary (Required 3 (Message OpBinary))
+  | OpVClosure (Required 4 (Message OpClosure))
     deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -219,6 +219,10 @@ data BinaryKind =
   | NotEqual
   | HeterogeneousEqual
   | HeterogeneousNotEqual
+  | LazyAnd
+  | LazyOr
+  | All
+  | Any
   deriving stock (Show, Enum, Bounded)
 
 newtype OpBinary = OpBinary
@@ -226,12 +230,9 @@ newtype OpBinary = OpBinary
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
-data TernaryKind =
-    VerifyEd25519Signature
-  deriving stock (Show, Enum, Bounded)
-
-newtype OpTernary = OpTernary
-  { kind :: Required 1 (Enumeration TernaryKind)
+data OpClosure = OpClosure
+  { params :: Repeated 1 (Value Int64)
+  , ops :: Repeated 2 (Message Op)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 

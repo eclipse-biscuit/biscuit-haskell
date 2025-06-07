@@ -240,6 +240,13 @@ factParser = predicateParser' factTermParser
 predicateParser :: Parser (Predicate' 'InPredicate 'WithSlices)
 predicateParser = predicateParser' predicateTermParser
 
+closureParser :: Parser (Text, Expression' 'WithSlices)
+closureParser = do
+    param <- l variableParser
+    _ <- l $ chunk "->"
+    body <- l expressionParser
+    pure (param, body)
+
 expressionParser :: Parser (Expression' 'WithSlices)
 expressionParser =
   let base = choice [ try methodsParser
@@ -249,9 +256,12 @@ expressionParser =
 
 table :: [[Expr.Operator Parser (Expression' 'WithSlices)]]
 table =
-  let infixL name op = Expr.InfixL (EBinary op <$ l (chunk name) <?> "infix operator")
-      infixN name op = Expr.InfixN (EBinary op <$ l (chunk name) <?> "infix operator")
+  let infixL name op = Expr.InfixL (makeBinary op <$ l (chunk name) <?> "infix operator")
+      infixN name op = Expr.InfixN (makeBinary op <$ l (chunk name) <?> "infix operator")
       prefix name op = Expr.Prefix (EUnary op <$  l (chunk name) <?> "prefix operator")
+      makeBinary LazyOr e e'  = EBinary LazyOr e (EClosure [] e')
+      makeBinary LazyAnd e e' = EBinary LazyAnd e (EClosure [] e')
+      makeBinary op e e'      = EBinary op e e'
    in [ [ prefix "!" Negate]
       , [ infixL  "*" Mul
         , infixL  "/" Div
@@ -273,8 +283,8 @@ table =
         , infixN  "==" HeterogeneousEqual
         , infixN  "!=" HeterogeneousNotEqual
         ]
-      , [ infixL "&&" And ]
-      , [ infixL "||" Or ]
+      , [ infixL "&&" LazyAnd ]
+      , [ infixL "||" LazyOr ]
       ]
 
 binaryMethodParser :: Parser (Expression' 'WithSlices -> Expression' 'WithSlices)
@@ -287,9 +297,14 @@ binaryMethodParser = do
     , Prefix       <$ chunk "starts_with"
     , Suffix       <$ chunk "ends_with"
     , Regex        <$ chunk "matches"
+    , Any          <$ chunk "any"
+    , All          <$ chunk "all"
     ]
   _ <- l $ C.char '('
-  e2 <- l expressionParser
+  e2 <- case method of
+    Any -> uncurry EClosure . first pure <$> l closureParser
+    All -> uncurry EClosure . first pure <$> l closureParser
+    _   -> l expressionParser
   _ <- l $ C.char ')'
   pure $ \e1 -> EBinary method e1 e2
 
@@ -371,8 +386,8 @@ queryParser inAuthorizer =
 
 checkParser :: Bool -> Parser (Check' 'Repr 'WithSlices)
 checkParser inAuthorizer = do
-  cKind <- l $ choice [ One <$ chunk "check if"
-                      , All <$ chunk "check all"
+  cKind <- l $ choice [ CheckOne <$ chunk "check if"
+                      , CheckAll <$ chunk "check all"
                       , Reject <$ chunk "reject if"
                       ]
   cQueries <- queryParser inAuthorizer

@@ -330,6 +330,28 @@ constraints = testGroup "Parse expressions"
                     (EValue $ TermSet [LInteger 2])
                  )
               )
+  , testCase "nullary closures" $
+      parseExpression "true || 1 === 2" @?=
+        Right (EBinary LazyOr
+                (EValue $ LBool True)
+                  (EClosure []
+                      (EBinary Equal
+                          (EValue $ LInteger 1)
+                          (EValue $ LInteger 2)
+                      )
+                  )
+              )
+  , testCase "unary closures" $
+      parseExpression "{1}.all($p -> $p === 1)" @?=
+        Right (EBinary All
+                (EValue . TermSet . Set.singleton $ LInteger 1)
+                (EClosure ["p"]
+                    (EBinary Equal
+                      (EValue $ Variable "p")
+                      (EValue $ LInteger 1)
+                    )
+                )
+              )
   , operatorPrecedences
   ]
 
@@ -346,18 +368,20 @@ operatorPrecedences = testGroup "mixed-precedence operators"
               )
   , testCase "< && starts_with" $
       parseExpression " 2 < $test && $var2.starts_with(\"test\") && true " @?=
-        Right (EBinary And
-                 (EBinary And
+        Right (EBinary LazyAnd
+                 (EBinary LazyAnd
                     (EBinary LessThan
                        (EValue $ LInteger 2)
                        (EValue $ Variable "test")
                     )
-                    (EBinary Prefix
-                       (EValue $ Variable "var2")
-                       (EValue $ LString "test")
+                    (EClosure []
+                      (EBinary Prefix
+                        (EValue $ Variable "var2")
+                        (EValue $ LString "test")
+                      )
                     )
                  )
-                 (EValue $ LBool True)
+                 (EClosure [] (EValue $ LBool True))
               )
   , testCase "+ *" $
       parseExpression "1 + 2 * 3" @?=
@@ -433,13 +457,13 @@ checkParsing = testGroup "check blocks"
       parseCheck "check if true" @?=
         Right Check
           { cQueries = [QueryItem [] [EValue $ LBool True] []]
-          , cKind = One
+          , cKind = CheckOne
           }
   , testCase "Simple check all" $
       parseCheck "check all true" @?=
         Right Check
           { cQueries = [QueryItem [] [EValue $ LBool True] []]
-          , cKind = All
+          , cKind = CheckAll
           }
   , testCase "Simple reject if" $
       parseCheck "reject if true" @?=
@@ -460,7 +484,7 @@ checkParsing = testGroup "check blocks"
                             [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
                             []
                 ]
-            , cKind = One
+            , cKind = CheckOne
             }
   , testCase "Multiple check all groups" $
       parseCheck
@@ -475,7 +499,7 @@ checkParsing = testGroup "check blocks"
                             [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
                             []
                 ]
-            , cKind = All
+            , cKind = CheckAll
             }
   , testCase "Multiple reject if groups" $
       parseCheck
@@ -505,7 +529,7 @@ checkParsing = testGroup "check blocks"
                             [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
                             [OnlyAuthority]
                 ]
-            , cKind = One
+            , cKind = CheckOne
             }
   , testCase "Multiple check all groups, scoped" $
       parseCheck
@@ -520,7 +544,7 @@ checkParsing = testGroup "check blocks"
                             [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
                             [OnlyAuthority]
                 ]
-            , cKind = All
+            , cKind = CheckAll
             }
   ]
 

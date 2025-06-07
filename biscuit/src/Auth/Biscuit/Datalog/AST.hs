@@ -99,6 +99,7 @@ module Auth.Biscuit.Datalog.AST
   , renderFact
   , renderRule
   , valueToSetTerm
+  , setValueToValue
   , toStack
   , substituteAuthorizer
   , substituteBlock
@@ -335,6 +336,18 @@ valueToSetTerm = \case
   Variable v  -> absurd v
   Antiquote v -> absurd v
 
+setValueToValue :: SetValue -> Value
+setValueToValue = \case
+  LInteger i  -> LInteger i
+  LString i   -> LString i
+  LDate i     -> LDate i
+  LBytes i    -> LBytes i
+  LBool i     -> LBool i
+  LNull       -> LNull
+  TermSet v   -> absurd v
+  Variable v  -> absurd v
+  Antiquote v -> absurd v
+
 valueToTerm :: Value -> Term
 valueToTerm = \case
   LInteger i  -> LInteger i
@@ -466,7 +479,7 @@ makeQueryItem qBody qExpressions qScope =
         Just vs -> Failure vs
 
 
-data CheckKind = One | All | Reject
+data CheckKind = CheckOne | CheckAll | Reject
   deriving (Eq, Show, Ord, Lift)
 
 data Check' evalCtx ctx = Check
@@ -486,7 +499,7 @@ type Check = Check' 'Repr 'Representation
 type EvalCheck = Check' 'Eval 'Representation
 
 isCheckOne :: Check' evalCtx ctx -> Bool
-isCheckOne Check{cKind} = cKind == One
+isCheckOne Check{cKind} = cKind == CheckOne
 
 isReject :: Check' evalCtx ctx -> Bool
 isReject Check{cKind} = cKind == Reject
@@ -533,8 +546,8 @@ renderQueryItem QueryItem{..} =
 renderCheck :: Check -> Text
 renderCheck Check{..} =
   let keyword = case cKind of
-        One    -> "check if"
-        All    -> "check all"
+        CheckOne    -> "check if"
+        CheckAll    -> "check all"
         Reject -> "reject if"
    in keyword <> " " <>
       intercalate "\n or " (renderQueryItem <$> cQueries)
@@ -623,8 +636,13 @@ ruleHasNoV4Operators Rule{expressions} =
 
 expressionHasNoV6ValuesOrOperators :: Expression -> Bool
 expressionHasNoV6ValuesOrOperators = \case
+  EClosure _ _ -> False
   EBinary HeterogeneousEqual _ _ -> False
   EBinary HeterogeneousNotEqual _ _ -> False
+  EBinary LazyAnd _ _ -> False
+  EBinary LazyOr _ _ -> False
+  EBinary All _ _ -> False
+  EBinary Any _ _ -> False
   EBinary _ l r -> expressionHasNoV6ValuesOrOperators l && expressionHasNoV6ValuesOrOperators r
   EUnary _ l -> expressionHasNoV6ValuesOrOperators l
   EValue LNull -> False
@@ -680,9 +698,10 @@ extractExprVariables =
         Variable name -> Set.singleton name
         _             -> Set.empty
    in \case
-        EValue t       -> keepVariable t
-        EUnary _ e     -> extractExprVariables e
-        EBinary _ e e' -> ((<>) `on` extractExprVariables) e e'
+        EValue t          -> keepVariable t
+        EUnary _ e        -> extractExprVariables e
+        EBinary _ e e'    -> ((<>) `on` extractExprVariables) e e'
+        EClosure params e -> extractExprVariables e Set.\\ Set.fromList params
 
 makeRule :: Predicate' 'InPredicate ctx
          -> [Predicate' 'InPredicate ctx]
@@ -728,12 +747,17 @@ data Binary =
   | NotEqual
   | HeterogeneousEqual
   | HeterogeneousNotEqual
+  | LazyAnd
+  | LazyOr
+  | All
+  | Any
   deriving (Eq, Ord, Show, Lift)
 
 data Expression' (ctx :: DatalogContext) =
     EValue (Term' 'NotWithinSet 'InPredicate ctx)
   | EUnary Unary (Expression' ctx)
   | EBinary Binary (Expression' ctx) (Expression' ctx)
+  | EClosure [Text] (Expression' ctx)
 
 deriving instance Eq   (Term' 'NotWithinSet 'InPredicate ctx) => Eq (Expression' ctx)
 deriving instance Ord  (Term' 'NotWithinSet 'InPredicate ctx) => Ord (Expression' ctx)
@@ -747,21 +771,28 @@ listSymbolsInExpression = \case
   EValue t       -> listSymbolsInTerm t
   EUnary _ e     -> listSymbolsInExpression e
   EBinary _ e e' -> foldMap listSymbolsInExpression [e, e']
+  EClosure ps e  -> Set.fromList ps <> listSymbolsInExpression e
 
 data Op =
     VOp Term
   | UOp Unary
   | BOp Binary
+  | COp [Text] [Op]
+  deriving (Eq, Show)
 
 fromStack :: [Op] -> Either String Expression
 fromStack =
-  let go stack []                    = Right stack
+  let go :: [Expression] -> [Op] -> Either String [Expression]
+      go stack []                    = Right stack
       go stack        (VOp t : rest) = go (EValue t : stack) rest
       go (e:stack)    (UOp o : rest) = go (EUnary o e : stack) rest
       go []           (UOp _ : _)    = Left "Empty stack on unary op"
       go (e:e':stack) (BOp o : rest) = go (EBinary o e' e : stack) rest
       go [_]          (BOp _ : _)    = Left "Unary stack on binary op"
       go []           (BOp _ : _)    = Left "Empty stack on binary op"
+      go stack        (COp ps ops : rest) = do
+        e <- fromStack ops
+        go (EClosure ps e : stack) rest
       final []  = Left "Empty stack"
       final [x] = Right x
       final _   = Left "Stack containing more than one element"
@@ -770,9 +801,10 @@ fromStack =
 toStack :: Expression -> [Op]
 toStack expr =
   let go e s = case e of
-        EValue t      -> VOp t : s
-        EUnary o i    -> go i $ UOp o : s
-        EBinary o l r -> go l $ go r $ BOp o : s
+        EValue t       -> VOp t : s
+        EUnary o i     -> go i $ UOp o : s
+        EBinary o l r  -> go l $ go r $ BOp o : s
+        EClosure ps ce -> COp ps (toStack ce) : s
    in go expr []
 
 renderExpression :: Expression -> Text
@@ -784,6 +816,9 @@ renderExpression =
                <> "." <> m <> "("
                <> renderExpression e'
                <> ")"
+      rC []  e = renderExpression e
+      rC [p] e = p <> " -> " <> renderExpression e
+      rC ps  e = "(" <> intercalate ", " ps <> ")" <> renderExpression e
    in \case
         EValue t                    -> renderId t
         EUnary Negate e             -> "!" <> renderExpression e
@@ -812,6 +847,11 @@ renderExpression =
         EBinary NotEqual e e'       -> rOp "!==" e e'
         EBinary HeterogeneousEqual e e' -> rOp "==" e e'
         EBinary HeterogeneousNotEqual e e' -> rOp "!=" e e'
+        EBinary LazyAnd e e'        -> rOp "&&" e e'
+        EBinary LazyOr e e'         -> rOp "||" e e'
+        EBinary All e e'            -> rm "all" e e'
+        EBinary Any e e'            -> rm "any" e e'
+        EClosure ps e               -> rC ps e
 
 -- | A biscuit block, containing facts, rules and checks.
 --
@@ -1176,6 +1216,7 @@ substituteExpression termMapping = \case
   EUnary op e -> EUnary op <$> substituteExpression termMapping e
   EBinary op e e' -> EBinary op <$> substituteExpression termMapping e
                                 <*> substituteExpression termMapping e'
+  EClosure ps e -> EClosure ps <$> substituteExpression termMapping e
 
 substituteScope :: Map Text PublicKey
                 -> RuleScope' 'Repr 'WithSlices

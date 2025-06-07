@@ -195,12 +195,12 @@ checkCheck l blockCount checkBlockId facts c@Check{cQueries,cKind} = do
   let queryMatchesAll = isQueryItemSatisfiedForAllMatches l blockCount checkBlockId facts
 
   case cKind of
-    One -> do
+    CheckOne -> do
        hasOkQueryItem <- anyM (fmap isJust . queryMatchesOne) cQueries
        pure $ if hasOkQueryItem
               then Success ()
               else failure (toRepresentation c)
-    All -> do
+    CheckAll -> do
        hasOkQueryItem <- anyM (fmap isJust . queryMatchesAll) cQueries
        pure $ if hasOkQueryItem
               then Success ()
@@ -454,6 +454,8 @@ evalBinary _ And (LBool b) (LBool b') = pure $ LBool (b && b')
 evalBinary _ And _ _ = Left "Only booleans support &&"
 evalBinary _ Or (LBool b) (LBool b') = pure $ LBool (b || b')
 evalBinary _ Or _ _ = Left "Only booleans support ||"
+evalBinary _ LazyAnd _ _ = Left "internal error: leftover &&"
+evalBinary _ LazyOr _ _ = Left "internal error: leftover ||"
 -- set operations
 evalBinary _ Contains (TermSet t) (TermSet t') = pure $ LBool (Set.isSubsetOf t' t)
 evalBinary _ Contains (TermSet t) t' = case valueToSetTerm t' of
@@ -462,9 +464,11 @@ evalBinary _ Contains (TermSet t) t' = case valueToSetTerm t' of
 evalBinary _ Contains (LString t) (LString t') = pure $ LBool (t' `isInfixOf` t)
 evalBinary _ Contains _ _ = Left "Only sets and strings support `.contains()`"
 evalBinary _ Intersection (TermSet t) (TermSet t') = pure $ TermSet (Set.intersection t t')
-evalBinary _ Intersection _ _ = Left "Only sets support `.intersection()`"
+evalBinary _ Intersection e e' = Left "Only sets support `.intersection()`"
 evalBinary _ Union (TermSet t) (TermSet t') = pure $ TermSet (Set.union t t')
 evalBinary _ Union _ _ = Left "Only sets support `.union()`"
+evalBinary _ Any _ _ = Left "internal error: leftover .any()"
+evalBinary _ All _ _ = Left "internal error: leftover .all()"
 
 checkedOp :: (Integer -> Integer -> Integer)
           -> Int64 -> Int64
@@ -483,6 +487,76 @@ regexMatch text regexT = do
   result <- Regex.execute regex text
   pure . LBool $ isJust result
 
+evaluateAll :: Limits
+            -> Bindings
+            -> Value
+            -> Expression
+            -> Either String Value
+evaluateAll l b xs' (EClosure [p] e) =
+  let runClosure v = do
+        if Map.member p b
+            then Left "Shadowed variable"
+            else Right ()
+        evaluateExpression l (Map.insert p (setValueToValue v) b) e >>= \case
+          LBool x -> Right x
+          _ -> Left "Expected boolean"
+   in case xs' of
+    TermSet xs -> LBool <$> allM runClosure xs
+    _ -> Left "Only sets support .all()"
+evaluateAll _ _ _  _ = Left "Expected closure"
+
+evaluateAny :: Limits
+            -> Bindings
+            -> Value
+            -> Expression
+            -> Either String Value
+evaluateAny l b xs' (EClosure [p] e) =
+  let runClosure v = do
+        if Map.member p b
+            then Left "Shadowed variable"
+            else Right ()
+        evaluateExpression l (Map.insert p (setValueToValue v) b) e >>= \case
+          LBool x -> Right x
+          _ -> Left "Expected boolean"
+   in case xs' of
+    TermSet xs -> LBool <$> anyM runClosure xs
+    _ -> Left "Only sets support .any()"
+evaluateAny _ _ _  _ = Left "Expected closure"
+
+evaluateLazyAnd :: Limits
+                -> Bindings
+                -> Value
+                -> Expression
+                -> Either String Value
+evaluateLazyAnd l b lhs' (EClosure [] e) =
+  let runClosure =
+        evaluateExpression l b e >>= \case
+          LBool x -> Right x
+          _ -> Left "Expected boolean"
+   in case lhs' of
+        LBool lhs -> if lhs
+                     then LBool <$> runClosure
+                     else Right $ LBool False
+        _ -> Left "Expected boolean"
+evaluateLazyAnd _ _ _  _ = Left "Expected closure"
+
+evaluateLazyOr :: Limits
+                -> Bindings
+                -> Value
+                -> Expression
+                -> Either String Value
+evaluateLazyOr l b lhs' (EClosure [] e) =
+  let runClosure =
+        evaluateExpression l b e >>= \case
+          LBool x -> Right x
+          _ -> Left "Expected boolean"
+   in case lhs' of
+        LBool lhs -> if lhs
+                     then Right $ LBool True
+                     else LBool <$> runClosure
+        _ -> Left "Expected boolean"
+evaluateLazyOr _ _ _  _ = Left "Expected closure"
+
 -- | Given bindings for variables, reduce an expression to a single
 -- datalog value
 evaluateExpression :: Limits
@@ -491,6 +565,18 @@ evaluateExpression :: Limits
                    -> Either String Value
 evaluateExpression l b = \case
     EValue term -> applyVariable b term
-    EUnary op e' -> evalUnary op =<< evaluateExpression l b e'
-    EBinary op e' e'' -> uncurry (evalBinary l op) =<< join bitraverse (evaluateExpression l b) (e', e'')
-
+    EUnary op e -> evalUnary op =<< evaluateExpression l b e
+    EBinary LazyAnd e e' -> do
+        lhs <- evaluateExpression l b e
+        evaluateLazyAnd l b lhs e'
+    EBinary LazyOr e e' -> do
+        lhs <- evaluateExpression l b e
+        evaluateLazyOr l b lhs e'
+    EBinary Any e e' -> do
+        lhs <- evaluateExpression l b e
+        evaluateAny l b lhs e'
+    EBinary All e e' -> do
+        lhs <- evaluateExpression l b e
+        evaluateAll l b lhs e'
+    EBinary op e e' -> uncurry (evalBinary l op) =<< join bitraverse (evaluateExpression l b) (e, e')
+    EClosure _ _ -> Left "Unexpected closure"

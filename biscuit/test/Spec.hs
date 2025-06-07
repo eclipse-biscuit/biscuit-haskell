@@ -6,6 +6,7 @@ module Main (main) where
 
 import           Test.Tasty
 
+import qualified Spec.AST            as AST
 import qualified Spec.Executor       as Executor
 import qualified Spec.NewCrypto      as NewCrypto
 import qualified Spec.Parser         as Parser
@@ -19,8 +20,8 @@ main :: IO ()
 main = do
   sampleReader <- SampleReader.getSpecs
   defaultMain $ testGroup "biscuit-haskell"
-    [
-      NewCrypto.specs
+    [ AST.specs
+    , NewCrypto.specs
     , Executor.specs
     , Parser.specs
     , Quasiquoter.specs

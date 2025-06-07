@@ -28,6 +28,7 @@ module Auth.Biscuit.ProtoBufAdapter
 
 import           Control.Monad            (unless, when)
 import           Control.Monad.State      (StateT, get, lift, modify)
+import           Data.Bitraversable       (bitraverse)
 import           Data.ByteString          (ByteString)
 import           Data.Int                 (Int64)
 import qualified Data.List.NonEmpty       as NE
@@ -247,10 +248,10 @@ pbToCheck s PB.CheckV2{queries,kind} = do
   rules <- traverse (pbToRule s) $ PB.getField queries
   let cQueries = toCheck <$> rules
   let cKind = case PB.getField kind of
-        Just PB.All    -> All
-        Just PB.One    -> One
-        Just PB.Reject -> Reject
-        Nothing        -> One
+        Just PB.CheckAll -> CheckAll
+        Just PB.CheckOne -> CheckOne
+        Just PB.Reject   -> Reject
+        Nothing          -> CheckOne
   pure Check{..}
 
 checkToPb :: ReverseSymbols -> Check -> PB.CheckV2
@@ -263,9 +264,9 @@ checkToPb s Check{..} =
                           , scope = qScope
                           }
       pbKind = case cKind of
-        One    -> Nothing
-        All    -> Just PB.All
-        Reject -> Just PB.Reject
+        CheckOne -> Nothing
+        CheckAll -> Just PB.CheckAll
+        Reject   -> Just PB.Reject
    in PB.CheckV2 { queries = PB.putField $ toQuery <$> cQueries
                  , kind = PB.putField pbKind
                  }
@@ -389,12 +390,14 @@ pbToOp s = \case
   PB.OpVValue v  -> VOp <$> pbToTerm s (PB.getField v)
   PB.OpVUnary v  -> pure . UOp . pbToUnary $ PB.getField v
   PB.OpVBinary v -> pure . BOp . pbToBinary $ PB.getField v
+  PB.OpVClosure v -> uncurry COp <$> pbToClosure s (PB.getField v)
 
 opToPb :: ReverseSymbols -> Op -> PB.Op
 opToPb s = \case
   VOp t -> PB.OpVValue  $ PB.putField $ termToPb s t
   UOp o -> PB.OpVUnary  $ PB.putField $ unaryToPb o
   BOp o -> PB.OpVBinary $ PB.putField $ binaryToPb o
+  COp p os -> PB.OpVClosure $ PB.putField $ closureToPb s p os
 
 pbToUnary :: PB.OpUnary -> Unary
 pbToUnary PB.OpUnary{kind} = case PB.getField kind of
@@ -433,6 +436,10 @@ pbToBinary PB.OpBinary{kind} = case PB.getField kind of
   PB.NotEqual              -> NotEqual
   PB.HeterogeneousEqual    -> HeterogeneousEqual
   PB.HeterogeneousNotEqual -> HeterogeneousNotEqual
+  PB.LazyAnd -> LazyAnd
+  PB.LazyOr  -> LazyOr
+  PB.All     -> All
+  PB.Any     -> Any
 
 binaryToPb :: Binary -> PB.OpBinary
 binaryToPb = PB.OpBinary . PB.putField . \case
@@ -459,6 +466,22 @@ binaryToPb = PB.OpBinary . PB.putField . \case
   NotEqual       -> PB.NotEqual
   HeterogeneousEqual -> PB.HeterogeneousEqual
   HeterogeneousNotEqual -> PB.HeterogeneousNotEqual
+  LazyAnd -> PB.LazyAnd
+  LazyOr  -> PB.LazyOr
+  All     -> PB.All
+  Any     -> PB.Any
+
+pbToClosure :: Symbols -> PB.OpClosure -> Either String ([T.Text], [Op])
+pbToClosure s PB.OpClosure{..} =
+  let getParams = traverse (getSymbol s . SymbolRef) . PB.getField
+      getOps = traverse (pbToOp s) . PB.getField
+   in bitraverse getParams getOps (params, ops)
+
+closureToPb :: ReverseSymbols -> [T.Text] -> [Op] -> PB.OpClosure
+closureToPb s params' ops' =
+  let params = PB.putField $ fmap (getSymbolRef . getSymbolCode s) params'
+      ops = PB.putField $ fmap (opToPb s) ops'
+   in PB.OpClosure{..}
 
 pbToThirdPartyBlockRequest :: PB.ThirdPartyBlockRequest -> Either String Crypto.Signature
 pbToThirdPartyBlockRequest PB.ThirdPartyBlockRequest{legacyPk, pkTable, prevSig} = do

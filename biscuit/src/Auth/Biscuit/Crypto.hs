@@ -6,6 +6,7 @@
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE TypeApplications           #-}
+{-# OPTIONS_GHC -fno-warn-unused-top-binds #-}
 {-|
   Module      : Auth.Biscuit.Crypto
   Copyright   : © Clément Delafargue, 2021
@@ -47,15 +48,13 @@ import           Data.ByteString            (ByteString)
 import           Data.Function              (on)
 import           Data.Int                   (Int32)
 import           Data.List.NonEmpty         (NonEmpty (..))
-import qualified Data.List.NonEmpty         as NE
-import           Data.Maybe                 (catMaybes, fromJust, fromMaybe,
+import           Data.Maybe                 ( fromJust, fromMaybe,
                                              isJust)
 import           Instances.TH.Lift          ()
 import           Language.Haskell.TH.Syntax
 
 import qualified Auth.Biscuit.Proto         as PB
 import qualified Data.Serialize             as PB
-import           Debug.Trace                (traceShowId)
 
 newtype PublicKey = PublicKey Ed25519.PublicKey
   deriving newtype (Eq, Show)

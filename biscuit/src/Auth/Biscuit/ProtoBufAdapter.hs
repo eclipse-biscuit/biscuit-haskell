@@ -180,6 +180,12 @@ blockToPb hasExternalPk existingSymbols b@Block{..} =
         , all (queryHasNoV4Operators . cQueries) bChecks
         ]
       v5Plus = hasExternalPk
+      v6Plus = or
+        [ any isReject bChecks
+        , not (all predicateHasNoV6Values bFacts)
+        , not (all ruleHasNoV6Values bRules)
+        , not (all checkHasNoV6Values bChecks)
+        ]
       bSymbols = buildSymbolTable existingSymbols b
       s = reverseSymbols $ addFromBlock existingSymbols bSymbols
       symbols   = PB.putField $ getSymbolList bSymbols
@@ -189,7 +195,8 @@ blockToPb hasExternalPk existingSymbols b@Block{..} =
       checks_v2 = PB.putField $ checkToPb s <$> bChecks
       scope     = PB.putField $ scopeToPb s <$> Set.toList bScope
       pksTable   = PB.putField $ publicKeyToPb <$> getPkList bSymbols
-      version   =  if | v5Plus    -> 5
+      version   =  if | v6Plus    -> 6
+                      | v5Plus    -> 5
                       | v4Plus    -> 4
                       | otherwise -> 3
    in ((bSymbols, version), PB.Block {version = PB.putField $ Just $ fromIntegral version, ..})

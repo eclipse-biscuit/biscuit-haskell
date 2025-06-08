@@ -50,7 +50,7 @@ ifFalse = MatchedQuery
 ifFalse' :: Check
 ifFalse' = Check
   { cQueries = matchedQuery ifFalse
-  , cKind = One
+  , cKind = CheckOne
   }
 
 checkAll' :: Check

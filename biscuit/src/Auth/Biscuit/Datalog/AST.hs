@@ -89,12 +89,17 @@ module Auth.Biscuit.Datalog.AST
   , queryHasNoV4Operators
   , ruleHasNoScope
   , ruleHasNoV4Operators
+  , ruleHasNoV6Values
+  , predicateHasNoV6Values
+  , checkHasNoV6Values
   , isCheckOne
+  , isReject
   , renderBlock
   , renderAuthorizer
   , renderFact
   , renderRule
   , valueToSetTerm
+  , setValueToValue
   , toStack
   , substituteAuthorizer
   , substituteBlock
@@ -212,6 +217,8 @@ data Term' (inSet :: IsWithinSet) (pof :: PredicateOrFact) (ctx :: DatalogContex
   -- ^ A slice (eg. @{name}@)
   | TermSet (SetType inSet ctx)
   -- ^ A set (eg. @[true, false]@)
+  | LNull
+  -- ^ @null@
 
 deriving instance ( Eq (VariableType inSet pof)
                   , Eq (SliceType ctx)
@@ -249,6 +256,7 @@ instance  ( Lift (VariableType inSet pof)
   lift (LBool b)       = [| LBool  b |]
   lift (TermSet terms) = [| TermSet terms |]
   lift (LDate t)       = [| LDate (read $(lift $ show t)) |]
+  lift LNull           = [| LNull |]
   lift (Antiquote s)   = [| s |]
 
 #if MIN_VERSION_template_haskell(2,17,0)
@@ -323,7 +331,20 @@ valueToSetTerm = \case
   LDate i     -> Just $ LDate i
   LBytes i    -> Just $ LBytes i
   LBool i     -> Just $ LBool i
+  LNull       -> Just LNull
   TermSet _   -> Nothing
+  Variable v  -> absurd v
+  Antiquote v -> absurd v
+
+setValueToValue :: SetValue -> Value
+setValueToValue = \case
+  LInteger i  -> LInteger i
+  LString i   -> LString i
+  LDate i     -> LDate i
+  LBytes i    -> LBytes i
+  LBool i     -> LBool i
+  LNull       -> LNull
+  TermSet v   -> absurd v
   Variable v  -> absurd v
   Antiquote v -> absurd v
 
@@ -334,6 +355,7 @@ valueToTerm = \case
   LDate i     -> LDate i
   LBytes i    -> LBytes i
   LBool i     -> LBool i
+  LNull       -> LNull
   TermSet i   -> TermSet i
   Variable v  -> absurd v
   Antiquote v -> absurd v
@@ -350,6 +372,7 @@ renderId' var set slice = \case
   LBytes bs     -> "hex:" <> encodeHex bs
   LBool True    -> "true"
   LBool False   -> "false"
+  LNull         -> "null"
   TermSet terms -> set terms
   Antiquote v   -> slice v
 
@@ -357,7 +380,7 @@ renderSet :: (SliceType ctx -> Text)
           -> Set (Term' 'WithinSet 'InFact ctx)
           -> Text
 renderSet slice terms =
-  "[" <> intercalate "," (renderId' absurd absurd slice <$> Set.toList terms) <> "]"
+  "{" <> intercalate "," (renderId' absurd absurd slice <$> Set.toList terms) <> "}"
 
 renderId :: Term -> Text
 renderId = renderId' ("$" <>) (renderSet absurd) absurd
@@ -453,7 +476,7 @@ makeQueryItem qBody qExpressions qScope =
         Just vs -> Failure vs
 
 
-data CheckKind = One | All
+data CheckKind = CheckOne | CheckAll | Reject
   deriving (Eq, Show, Ord, Lift)
 
 data Check' evalCtx ctx = Check
@@ -473,7 +496,10 @@ type Check = Check' 'Repr 'Representation
 type EvalCheck = Check' 'Eval 'Representation
 
 isCheckOne :: Check' evalCtx ctx -> Bool
-isCheckOne Check{cKind} = cKind == One
+isCheckOne Check{cKind} = cKind == CheckOne
+
+isReject :: Check' evalCtx ctx -> Bool
+isReject Check{cKind} = cKind == Reject
 
 data PolicyType = Allow | Deny
   deriving (Eq, Show, Ord, Lift)
@@ -516,10 +542,11 @@ renderQueryItem QueryItem{..} =
 
 renderCheck :: Check -> Text
 renderCheck Check{..} =
-  let kindToken = case cKind of
-        One -> "if"
-        All -> "all"
-   in "check " <> kindToken <> " " <>
+  let keyword = case cKind of
+        CheckOne    -> "check if"
+        CheckAll    -> "check all"
+        Reject -> "reject if"
+   in keyword <> " " <>
       intercalate "\n or " (renderQueryItem <$> cQueries)
 
 listSymbolsInQueryItem :: QueryItem' evalCtx 'Representation -> Set.Set Text
@@ -604,6 +631,40 @@ ruleHasNoV4Operators :: Rule -> Bool
 ruleHasNoV4Operators Rule{expressions} =
   all expressionHasNoV4Operators expressions
 
+expressionHasNoV6ValuesOrOperators :: Expression -> Bool
+expressionHasNoV6ValuesOrOperators = \case
+  EClosure _ _ -> False
+  EBinary HeterogeneousEqual _ _ -> False
+  EBinary HeterogeneousNotEqual _ _ -> False
+  EBinary LazyAnd _ _ -> False
+  EBinary LazyOr _ _ -> False
+  EBinary All _ _ -> False
+  EBinary Any _ _ -> False
+  EBinary _ l r -> expressionHasNoV6ValuesOrOperators l && expressionHasNoV6ValuesOrOperators r
+  EUnary _ l -> expressionHasNoV6ValuesOrOperators l
+  EValue LNull -> False
+  EValue _ -> True
+
+ruleHasNoV6Values :: Rule -> Bool
+ruleHasNoV6Values Rule{rhead, body, expressions} =
+         predicateHasNoV6Values rhead
+  && all predicateHasNoV6Values body
+  && all expressionHasNoV6ValuesOrOperators expressions
+
+predicateHasNoV6Values :: Predicate' a b -> Bool
+predicateHasNoV6Values Predicate{terms} =
+  let hasV6 = \case
+        LNull -> True
+        _ -> False
+   in all (not . hasV6) terms
+
+checkHasNoV6Values :: Check -> Bool
+checkHasNoV6Values Check{cQueries} =
+  let hasNoV6 QueryItem{qBody, qExpressions} =
+           all predicateHasNoV6Values qBody
+        && all expressionHasNoV6ValuesOrOperators qExpressions
+   in all hasNoV6 cQueries
+
 renderRule :: Rule -> Text
 renderRule Rule{rhead,body,expressions,scope} =
      renderPredicate rhead <> " <- "
@@ -634,9 +695,10 @@ extractExprVariables =
         Variable name -> Set.singleton name
         _             -> Set.empty
    in \case
-        EValue t       -> keepVariable t
-        EUnary _ e     -> extractExprVariables e
-        EBinary _ e e' -> ((<>) `on` extractExprVariables) e e'
+        EValue t          -> keepVariable t
+        EUnary _ e        -> extractExprVariables e
+        EBinary _ e e'    -> ((<>) `on` extractExprVariables) e e'
+        EClosure params e -> extractExprVariables e Set.\\ Set.fromList params
 
 makeRule :: Predicate' 'InPredicate ctx
          -> [Predicate' 'InPredicate ctx]
@@ -680,12 +742,19 @@ data Binary =
   | BitwiseOr
   | BitwiseXor
   | NotEqual
+  | HeterogeneousEqual
+  | HeterogeneousNotEqual
+  | LazyAnd
+  | LazyOr
+  | All
+  | Any
   deriving (Eq, Ord, Show, Lift)
 
 data Expression' (ctx :: DatalogContext) =
     EValue (Term' 'NotWithinSet 'InPredicate ctx)
   | EUnary Unary (Expression' ctx)
   | EBinary Binary (Expression' ctx) (Expression' ctx)
+  | EClosure [Text] (Expression' ctx)
 
 deriving instance Eq   (Term' 'NotWithinSet 'InPredicate ctx) => Eq (Expression' ctx)
 deriving instance Ord  (Term' 'NotWithinSet 'InPredicate ctx) => Ord (Expression' ctx)
@@ -699,21 +768,28 @@ listSymbolsInExpression = \case
   EValue t       -> listSymbolsInTerm t
   EUnary _ e     -> listSymbolsInExpression e
   EBinary _ e e' -> foldMap listSymbolsInExpression [e, e']
+  EClosure ps e  -> Set.fromList ps <> listSymbolsInExpression e
 
 data Op =
     VOp Term
   | UOp Unary
   | BOp Binary
+  | COp [Text] [Op]
+  deriving (Eq, Show)
 
 fromStack :: [Op] -> Either String Expression
 fromStack =
-  let go stack []                    = Right stack
+  let go :: [Expression] -> [Op] -> Either String [Expression]
+      go stack []                    = Right stack
       go stack        (VOp t : rest) = go (EValue t : stack) rest
       go (e:stack)    (UOp o : rest) = go (EUnary o e : stack) rest
       go []           (UOp _ : _)    = Left "Empty stack on unary op"
       go (e:e':stack) (BOp o : rest) = go (EBinary o e' e : stack) rest
       go [_]          (BOp _ : _)    = Left "Unary stack on binary op"
       go []           (BOp _ : _)    = Left "Empty stack on binary op"
+      go stack        (COp ps ops : rest) = do
+        e <- fromStack ops
+        go (EClosure ps e : stack) rest
       final []  = Left "Empty stack"
       final [x] = Right x
       final _   = Left "Stack containing more than one element"
@@ -725,6 +801,7 @@ toStack expr =
         EValue t      -> VOp t : s
         EUnary o i    -> go i $ UOp o : s
         EBinary o l r -> go l $ go r $ BOp o : s
+        EClosure ps ce -> COp ps (toStack ce) : s
    in go expr []
 
 renderExpression :: Expression -> Text
@@ -736,6 +813,9 @@ renderExpression =
                <> "." <> m <> "("
                <> renderExpression e'
                <> ")"
+      rC []  e = renderExpression e
+      rC [p] e = p <> " -> " <> renderExpression e
+      rC ps  e = "(" <> intercalate ", " ps <> ")" <> renderExpression e
    in \case
         EValue t                    -> renderId t
         EUnary Negate e             -> "!" <> renderExpression e
@@ -745,7 +825,7 @@ renderExpression =
         EBinary GreaterThan e e'    -> rOp ">" e e'
         EBinary LessOrEqual e e'    -> rOp "<=" e e'
         EBinary GreaterOrEqual e e' -> rOp ">=" e e'
-        EBinary Equal e e'          -> rOp "==" e e'
+        EBinary Equal e e'          -> rOp "===" e e'
         EBinary Contains e e'       -> rm "contains" e e'
         EBinary Prefix e e'         -> rm "starts_with" e e'
         EBinary Suffix e e'         -> rm "ends_with" e e'
@@ -761,7 +841,14 @@ renderExpression =
         EBinary BitwiseAnd e e'     -> rOp "&" e e'
         EBinary BitwiseOr e e'      -> rOp "|" e e'
         EBinary BitwiseXor e e'     -> rOp "^" e e'
-        EBinary NotEqual e e'       -> rOp "!=" e e'
+        EBinary NotEqual e e'       -> rOp "!==" e e'
+        EBinary HeterogeneousEqual e e' -> rOp "==" e e'
+        EBinary HeterogeneousNotEqual e e' -> rOp "!=" e e'
+        EBinary LazyAnd e e'        -> rOp "&&" e e'
+        EBinary LazyOr e e'         -> rOp "||" e e'
+        EBinary All e e'            -> rm "all" e e'
+        EBinary Any e e'            -> rm "any" e e'
+        EClosure ps e               -> rC ps e
 
 -- | A biscuit block, containing facts, rules and checks.
 --
@@ -1081,6 +1168,7 @@ substitutePTerm termMapping = \case
   LDate i     -> pure $ LDate i
   LBytes i    -> pure $ LBytes i
   LBool i     -> pure $ LBool i
+  LNull       -> pure $ LNull
   TermSet i   ->
     TermSet . Set.fromList <$> traverse (substituteSetTerm termMapping) (Set.toList i)
   Variable i  -> pure $ Variable i
@@ -1095,6 +1183,7 @@ substituteTerm termMapping = \case
   LDate i     -> pure $ LDate i
   LBytes i    -> pure $ LBytes i
   LBool i     -> pure $ LBool i
+  LNull       -> pure $ LNull
   TermSet i   ->
     TermSet . Set.fromList <$> traverse (substituteSetTerm termMapping) (Set.toList i)
   Variable v  -> absurd v
@@ -1109,6 +1198,7 @@ substituteSetTerm termMapping = \case
   LDate i     -> pure $ LDate i
   LBytes i    -> pure $ LBytes i
   LBool i     -> pure $ LBool i
+  LNull       -> pure $ LNull
   TermSet v   -> absurd v
   Variable v  -> absurd v
   Antiquote (Slice v) ->
@@ -1123,6 +1213,7 @@ substituteExpression termMapping = \case
   EUnary op e -> EUnary op <$> substituteExpression termMapping e
   EBinary op e e' -> EBinary op <$> substituteExpression termMapping e
                                 <*> substituteExpression termMapping e'
+  EClosure ps e -> EClosure ps <$> substituteExpression termMapping e
 
 substituteScope :: Map Text PublicKey
                 -> RuleScope' 'Repr 'WithSlices

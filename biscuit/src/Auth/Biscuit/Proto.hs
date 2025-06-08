@@ -29,13 +29,13 @@ module Auth.Biscuit.Proto
   , TermV2 (..)
   , ExpressionV2 (..)
   , TermSet (..)
+  , Empty (..)
   , Op (..)
   , OpUnary (..)
   , UnaryKind (..)
   , OpBinary (..)
   , BinaryKind (..)
-  , OpTernary (..)
-  , TernaryKind (..)
+  , OpClosure (..)
   , ThirdPartyBlockContents (..)
   , ThirdPartyBlockRequest (..)
   , getField
@@ -83,6 +83,7 @@ data SignedBlock = SignedBlock
   , nextKey     :: Required 2 (Message PublicKey)
   , signature   :: Required 3 (Value ByteString)
   , externalSig :: Optional 4 (Message ExternalSig)
+  , version     :: Optional 5 (Value Int32)
   }
   deriving (Generic, Show)
   deriving anyclass (Decode, Encode)
@@ -134,8 +135,9 @@ data RuleV2 = RuleV2
     deriving anyclass (Decode, Encode)
 
 data CheckKind =
-    One
-  | All
+    CheckOne
+  | CheckAll
+  | Reject
   deriving stock (Show, Enum, Bounded)
 
 data CheckV2 = CheckV2
@@ -158,6 +160,11 @@ data TermV2 =
   | TermBytes    (Required 5 (Value ByteString))
   | TermBool     (Required 6 (Value Bool))
   | TermTermSet  (Required 7 (Message TermSet))
+  | TermNull     (Required 8 (Message Empty))
+    deriving stock (Generic, Show)
+    deriving anyclass (Decode, Encode)
+
+data Empty = Empty {}
     deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -176,6 +183,7 @@ data Op =
     OpVValue  (Required 1 (Message TermV2))
   | OpVUnary  (Required 2 (Message OpUnary))
   | OpVBinary (Required 3 (Message OpBinary))
+  | OpVClosure (Required 4 (Message OpClosure))
     deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -209,6 +217,12 @@ data BinaryKind =
   | BitwiseOr
   | BitwiseXor
   | NotEqual
+  | HeterogeneousEqual
+  | HeterogeneousNotEqual
+  | LazyAnd
+  | LazyOr
+  | All
+  | Any
   deriving stock (Show, Enum, Bounded)
 
 newtype OpBinary = OpBinary
@@ -216,12 +230,9 @@ newtype OpBinary = OpBinary
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
-data TernaryKind =
-    VerifyEd25519Signature
-  deriving stock (Show, Enum, Bounded)
-
-newtype OpTernary = OpTernary
-  { kind :: Required 1 (Enumeration TernaryKind)
+data OpClosure = OpClosure
+  { params :: Repeated 1 (Value Int64)
+  , ops :: Repeated 2 (Message Op)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -253,8 +264,9 @@ decodeThirdPartyBlockContents = runGet decodeMessage
 
 data ThirdPartyBlockRequest
   = ThirdPartyBlockRequest
-  { previousPk :: Required 1 (Message PublicKey)
-  , pkTable    :: Repeated 2 (Message PublicKey)
+  { legacyPk :: Optional 1 (Message PublicKey)
+  , pkTable  :: Repeated 2 (Message PublicKey)
+  , prevSig  :: Required 3 (Value ByteString)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 

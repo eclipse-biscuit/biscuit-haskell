@@ -28,6 +28,7 @@ module Auth.Biscuit.ProtoBufAdapter
 
 import           Control.Monad            (unless, when)
 import           Control.Monad.State      (StateT, get, lift, modify)
+import           Data.Bitraversable       (bitraverse)
 import           Data.ByteString          (ByteString)
 import           Data.Int                 (Int64)
 import qualified Data.List.NonEmpty       as NE
@@ -72,10 +73,12 @@ pbToSignedBlock PB.SignedBlock{..} = do
   let sig = Crypto.signature $ PB.getField signature
   mSig <- traverse pbToOptionalSignature $ PB.getField externalSig
   pk  <- pbToPublicKey $ PB.getField nextKey
+  let sigVersion = fromIntegral <$> PB.getField version
   pure ( PB.getField block
        , sig
        , pk
        , mSig
+       , sigVersion
        )
 
 publicKeyToPb :: Crypto.PublicKey -> PB.PublicKey
@@ -91,11 +94,12 @@ externalSigToPb (sig, pk) = PB.ExternalSig
   }
 
 signedBlockToPb :: Crypto.SignedBlock -> PB.SignedBlock
-signedBlockToPb (block, sig, pk, eSig) = PB.SignedBlock
+signedBlockToPb (block, sig, pk, eSig, sigVersion) = PB.SignedBlock
   { block = PB.putField block
   , signature = PB.putField $ Crypto.sigBytes sig
   , nextKey = PB.putField $ publicKeyToPb pk
   , externalSig = PB.putField $ externalSigToPb <$> eSig
+  , version = PB.putField $ fromIntegral <$> sigVersion
   }
 
 pbToProof :: PB.Proof -> Either String (Either Crypto.Signature Crypto.SecretKey)
@@ -129,7 +133,13 @@ pbToBlock ePk PB.Block{..} = do
     bRules <- traverse (pbToRule s) $ PB.getField rules_v2
     bChecks <- traverse (pbToCheck s) $ PB.getField checks_v2
     bScope <- Set.fromList <$> traverse (pbToScope s) (PB.getField scope)
-    let v5Plus = isJust ePk
+    let v6Plus = or
+          [ any isReject bChecks
+          , any (not . predicateHasNoV6Values) bFacts
+          , any (not . ruleHasNoV6Values) bRules
+          , any (not . checkHasNoV6Values) bChecks
+          ]
+        v5Plus = isJust ePk
         v4Plus = not $ and
           [ Set.null bScope
           , all ruleHasNoScope bRules
@@ -138,22 +148,29 @@ pbToBlock ePk PB.Block{..} = do
           , all ruleHasNoV4Operators bRules
           , all (queryHasNoV4Operators . cQueries) bChecks
           ]
-    case (bVersion, v4Plus, v5Plus) of
-      (Just 5, _, _) -> pure Block {..}
-      (Just 4, _, False) -> pure Block {..}
-      (Just 4, _, True) ->
+    case (bVersion, v4Plus, v5Plus, v6Plus) of
+      (Just 6, _, _, _) -> pure Block {..}
+      (Just 5, _, _, True) ->
+        Left "Biscuit v6 features are present, but the block version is 5."
+      (Just 5, _, _, _) -> pure Block {..}
+      (Just 4, _, False, False) -> pure Block {..}
+      (Just 4, _, _, True) ->
+        Left "Biscuit v6 features are present, but the block version is 4."
+      (Just 4, _, True, False) ->
         Left "Biscuit v5 features are present, but the block version is 4."
-      (Just 3, False, False) -> pure Block {..}
-      (Just 3, True, False) ->
+      (Just 3, False, False, False) -> pure Block {..}
+      (Just 3, True, False, False) ->
         Left "Biscuit v4 features are present, but the block version is 3."
-      (Just 3, _, True) ->
+      (Just 3, _, True, False) ->
         Left "Biscuit v5 features are present, but the block version is 3."
+      (Just 3, _, _, True) ->
+        Left "Biscuit v6 features are present, but the block version is 3."
       _ ->
-        Left $ "Unsupported biscuit version: " <> maybe "0" show bVersion <> ". Only versions 3 and 4 are supported"
+        Left $ "Unsupported biscuit version: " <> maybe "0" show bVersion <> ". Only versions 3 to 6 are supported"
 
 -- | Turn a biscuit block into a protobuf block, for serialization,
 -- along with the newly defined symbols
-blockToPb :: Bool -> Symbols -> Block -> (BlockSymbols, PB.Block)
+blockToPb :: Bool -> Symbols -> Block -> ((BlockSymbols, Int), PB.Block)
 blockToPb hasExternalPk existingSymbols b@Block{..} =
   let v4Plus = not $ and
         [Set.null bScope
@@ -164,6 +181,12 @@ blockToPb hasExternalPk existingSymbols b@Block{..} =
         , all (queryHasNoV4Operators . cQueries) bChecks
         ]
       v5Plus = hasExternalPk
+      v6Plus = or
+        [ any isReject bChecks
+        , any (not . predicateHasNoV6Values) bFacts
+        , any (not . ruleHasNoV6Values) bRules
+        , any (not . checkHasNoV6Values) bChecks
+        ]
       bSymbols = buildSymbolTable existingSymbols b
       s = reverseSymbols $ addFromBlock existingSymbols bSymbols
       symbols   = PB.putField $ getSymbolList bSymbols
@@ -173,10 +196,11 @@ blockToPb hasExternalPk existingSymbols b@Block{..} =
       checks_v2 = PB.putField $ checkToPb s <$> bChecks
       scope     = PB.putField $ scopeToPb s <$> Set.toList bScope
       pksTable   = PB.putField $ publicKeyToPb <$> getPkList bSymbols
-      version   = PB.putField $ if | v5Plus    -> Just 5
-                                   | v4Plus    -> Just 4
-                                   | otherwise -> Just 3
-   in (bSymbols, PB.Block {..})
+      version   =  if | v6Plus    -> 6
+                      | v5Plus    -> 5
+                      | v4Plus    -> 4
+                      | otherwise -> 3
+   in ((bSymbols, version), PB.Block {version = PB.putField $ Just $ fromIntegral version, ..})
 
 pbToFact :: Symbols -> PB.FactV2 -> Either String Fact
 pbToFact s PB.FactV2{predicate} = do
@@ -224,9 +248,10 @@ pbToCheck s PB.CheckV2{queries,kind} = do
   rules <- traverse (pbToRule s) $ PB.getField queries
   let cQueries = toCheck <$> rules
   let cKind = case PB.getField kind of
-        Just PB.All -> All
-        Just PB.One -> One
-        Nothing     -> One
+        Just PB.CheckAll -> CheckAll
+        Just PB.CheckOne -> CheckOne
+        Just PB.Reject   -> Reject
+        Nothing          -> CheckOne
   pure Check{..}
 
 checkToPb :: ReverseSymbols -> Check -> PB.CheckV2
@@ -239,8 +264,9 @@ checkToPb s Check{..} =
                           , scope = qScope
                           }
       pbKind = case cKind of
-        One -> Nothing
-        All -> Just PB.All
+        CheckOne -> Nothing
+        CheckAll -> Just PB.CheckAll
+        Reject   -> Just PB.Reject
    in PB.CheckV2 { queries = PB.putField $ toQuery <$> cQueries
                  , kind = PB.putField pbKind
                  }
@@ -286,6 +312,7 @@ pbToTerm s = \case
   PB.TermBool     f -> pure $ LBool    $ PB.getField f
   PB.TermVariable f -> Variable <$> getSymbol s (SymbolRef $ PB.getField f)
   PB.TermTermSet  f -> TermSet . Set.fromList <$> traverse (pbToSetValue s) (PB.getField . PB.set $ PB.getField f)
+  PB.TermNull     _ -> pure LNull
 
 termToPb :: ReverseSymbols -> Term -> PB.TermV2
 termToPb s = \case
@@ -296,6 +323,7 @@ termToPb s = \case
   LBytes   v -> PB.TermBytes    $ PB.putField v
   LBool    v -> PB.TermBool     $ PB.putField v
   TermSet vs -> PB.TermTermSet  $ PB.putField $ PB.TermSet $ PB.putField $ setValueToPb s <$> Set.toList vs
+  LNull      -> PB.TermNull     $ PB.putField $ PB.Empty {}
 
   Antiquote v -> absurd v
 
@@ -308,6 +336,7 @@ pbToValue s = \case
   PB.TermBool     f -> pure $ LBool    $ PB.getField f
   PB.TermVariable _ -> Left "Variables can't appear in facts"
   PB.TermTermSet  f -> TermSet . Set.fromList <$> traverse (pbToSetValue s) (PB.getField . PB.set $ PB.getField f)
+  PB.TermNull     _ -> pure LNull
 
 valueToPb :: ReverseSymbols -> Value -> PB.TermV2
 valueToPb s = \case
@@ -317,6 +346,7 @@ valueToPb s = \case
   LBytes   v -> PB.TermBytes   $ PB.putField v
   LBool    v -> PB.TermBool    $ PB.putField v
   TermSet vs -> PB.TermTermSet $ PB.putField $ PB.TermSet $ PB.putField $ setValueToPb s <$> Set.toList vs
+  LNull      -> PB.TermNull $ PB.putField PB.Empty
 
   Variable v  -> absurd v
   Antiquote v -> absurd v
@@ -328,6 +358,7 @@ pbToSetValue s = \case
   PB.TermDate     f -> pure $ LDate    $ pbTimeToUtcTime $ PB.getField f
   PB.TermBytes    f -> pure $ LBytes   $ PB.getField f
   PB.TermBool     f -> pure $ LBool    $ PB.getField f
+  PB.TermNull     _ -> pure $ LNull
   PB.TermVariable _ -> Left "Variables can't appear in facts or sets"
   PB.TermTermSet  _ -> Left "Sets can't be nested"
 
@@ -338,6 +369,7 @@ setValueToPb s = \case
   LDate    v  -> PB.TermDate    $ PB.putField $ round $ utcTimeToPOSIXSeconds v
   LBytes   v  -> PB.TermBytes   $ PB.putField v
   LBool    v  -> PB.TermBool    $ PB.putField v
+  LNull      -> PB.TermNull     $ PB.putField $ PB.Empty {}
 
   TermSet   v -> absurd v
   Variable  v -> absurd v
@@ -358,12 +390,14 @@ pbToOp s = \case
   PB.OpVValue v  -> VOp <$> pbToTerm s (PB.getField v)
   PB.OpVUnary v  -> pure . UOp . pbToUnary $ PB.getField v
   PB.OpVBinary v -> pure . BOp . pbToBinary $ PB.getField v
+  PB.OpVClosure v -> uncurry COp <$> pbToClosure s (PB.getField v)
 
 opToPb :: ReverseSymbols -> Op -> PB.Op
 opToPb s = \case
   VOp t -> PB.OpVValue  $ PB.putField $ termToPb s t
   UOp o -> PB.OpVUnary  $ PB.putField $ unaryToPb o
   BOp o -> PB.OpVBinary $ PB.putField $ binaryToPb o
+  COp p os -> PB.OpVClosure $ PB.putField $ closureToPb s p os
 
 pbToUnary :: PB.OpUnary -> Unary
 pbToUnary PB.OpUnary{kind} = case PB.getField kind of
@@ -379,27 +413,33 @@ unaryToPb = PB.OpUnary . PB.putField . \case
 
 pbToBinary :: PB.OpBinary -> Binary
 pbToBinary PB.OpBinary{kind} = case PB.getField kind of
-  PB.LessThan       -> LessThan
-  PB.GreaterThan    -> GreaterThan
-  PB.LessOrEqual    -> LessOrEqual
-  PB.GreaterOrEqual -> GreaterOrEqual
-  PB.Equal          -> Equal
-  PB.Contains       -> Contains
-  PB.Prefix         -> Prefix
-  PB.Suffix         -> Suffix
-  PB.Regex          -> Regex
-  PB.Add            -> Add
-  PB.Sub            -> Sub
-  PB.Mul            -> Mul
-  PB.Div            -> Div
-  PB.And            -> And
-  PB.Or             -> Or
-  PB.Intersection   -> Intersection
-  PB.Union          -> Union
-  PB.BitwiseAnd     -> BitwiseAnd
-  PB.BitwiseOr      -> BitwiseOr
-  PB.BitwiseXor     -> BitwiseXor
-  PB.NotEqual       -> NotEqual
+  PB.LessThan              -> LessThan
+  PB.GreaterThan           -> GreaterThan
+  PB.LessOrEqual           -> LessOrEqual
+  PB.GreaterOrEqual        -> GreaterOrEqual
+  PB.Equal                 -> Equal
+  PB.Contains              -> Contains
+  PB.Prefix                -> Prefix
+  PB.Suffix                -> Suffix
+  PB.Regex                 -> Regex
+  PB.Add                   -> Add
+  PB.Sub                   -> Sub
+  PB.Mul                   -> Mul
+  PB.Div                   -> Div
+  PB.And                   -> And
+  PB.Or                    -> Or
+  PB.Intersection          -> Intersection
+  PB.Union                 -> Union
+  PB.BitwiseAnd            -> BitwiseAnd
+  PB.BitwiseOr             -> BitwiseOr
+  PB.BitwiseXor            -> BitwiseXor
+  PB.NotEqual              -> NotEqual
+  PB.HeterogeneousEqual    -> HeterogeneousEqual
+  PB.HeterogeneousNotEqual -> HeterogeneousNotEqual
+  PB.LazyAnd -> LazyAnd
+  PB.LazyOr  -> LazyOr
+  PB.All     -> All
+  PB.Any     -> Any
 
 binaryToPb :: Binary -> PB.OpBinary
 binaryToPb = PB.OpBinary . PB.putField . \case
@@ -424,16 +464,36 @@ binaryToPb = PB.OpBinary . PB.putField . \case
   BitwiseOr      -> PB.BitwiseOr
   BitwiseXor     -> PB.BitwiseXor
   NotEqual       -> PB.NotEqual
+  HeterogeneousEqual -> PB.HeterogeneousEqual
+  HeterogeneousNotEqual -> PB.HeterogeneousNotEqual
+  LazyAnd -> PB.LazyAnd
+  LazyOr  -> PB.LazyOr
+  All     -> PB.All
+  Any     -> PB.Any
 
-pbToThirdPartyBlockRequest :: PB.ThirdPartyBlockRequest -> Either String Crypto.PublicKey
-pbToThirdPartyBlockRequest PB.ThirdPartyBlockRequest{previousPk, pkTable} = do
+pbToClosure :: Symbols -> PB.OpClosure -> Either String ([T.Text], [Op])
+pbToClosure s PB.OpClosure{..} =
+  let getParams = traverse (getSymbol s . SymbolRef) . PB.getField
+      getOps = traverse (pbToOp s) . PB.getField
+   in bitraverse getParams getOps (params, ops)
+
+closureToPb :: ReverseSymbols -> [T.Text] -> [Op] -> PB.OpClosure
+closureToPb s params' ops' =
+  let params = PB.putField $ fmap (getSymbolRef . getSymbolCode s) params'
+      ops = PB.putField $ fmap (opToPb s) ops'
+   in PB.OpClosure{..}
+
+pbToThirdPartyBlockRequest :: PB.ThirdPartyBlockRequest -> Either String Crypto.Signature
+pbToThirdPartyBlockRequest PB.ThirdPartyBlockRequest{legacyPk, pkTable, prevSig} = do
+  unless (isNothing $ PB.getField legacyPk) $ Left "Public key provided in third-party block request"
   unless (null $ PB.getField pkTable) $ Left "Public key table provided in third-party block request"
-  pbToPublicKey $ PB.getField previousPk
+  pure . Crypto.signature $ PB.getField prevSig
 
-thirdPartyBlockRequestToPb :: Crypto.PublicKey -> PB.ThirdPartyBlockRequest
-thirdPartyBlockRequestToPb previousPk = PB.ThirdPartyBlockRequest
-  { previousPk = PB.putField $ publicKeyToPb previousPk
+thirdPartyBlockRequestToPb :: Crypto.Signature -> PB.ThirdPartyBlockRequest
+thirdPartyBlockRequestToPb prevSig = PB.ThirdPartyBlockRequest
+  { legacyPk = PB.putField Nothing
   , pkTable = PB.putField []
+  , prevSig = PB.putField $ Crypto.sigBytes prevSig
   }
 
 pbToThirdPartyBlockContents :: PB.ThirdPartyBlockContents -> Either String (ByteString, Crypto.Signature, Crypto.PublicKey)

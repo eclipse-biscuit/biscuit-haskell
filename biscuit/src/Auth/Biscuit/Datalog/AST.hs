@@ -799,6 +799,7 @@ data Unary =
     Negate
   | Parens
   | Length
+  | TypeOf
   deriving (Eq, Ord, Show, Lift)
 
 data Binary =
@@ -903,6 +904,7 @@ renderExpression =
         EUnary Negate e             -> "!" <> renderExpression e
         EUnary Parens e             -> "(" <> renderExpression e <> ")"
         EUnary Length e             -> renderExpression e <> ".length()"
+        EUnary TypeOf e             -> renderExpression e <> ".type()"
         EBinary LessThan e e'       -> rOp "<" e e'
         EBinary GreaterThan e e'    -> rOp ">" e e'
         EBinary LessOrEqual e e'    -> rOp "<=" e e'

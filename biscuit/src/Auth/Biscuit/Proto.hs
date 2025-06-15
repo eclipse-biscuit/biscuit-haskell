@@ -215,7 +215,7 @@ data Op =
     deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
-data UnaryKind = Negate | Parens | Length
+data UnaryKind = Negate | Parens | Length | TypeOf
   deriving stock (Show, Enum, Bounded)
 
 newtype OpUnary = OpUnary

@@ -433,12 +433,14 @@ pbToUnary PB.OpUnary{kind} = case PB.getField kind of
   PB.Negate -> Negate
   PB.Parens -> Parens
   PB.Length -> Length
+  PB.TypeOf -> TypeOf
 
 unaryToPb ::  Unary -> PB.OpUnary
 unaryToPb = PB.OpUnary . PB.putField . \case
   Negate -> PB.Negate
   Parens -> PB.Parens
   Length -> PB.Length
+  TypeOf -> PB.TypeOf
 
 pbToBinary :: PB.OpBinary -> Binary
 pbToBinary PB.OpBinary{kind} = case PB.getField kind of

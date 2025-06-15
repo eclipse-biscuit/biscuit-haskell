@@ -399,6 +399,17 @@ evalUnary Length (TermSet s) = pure . LInteger . fromIntegral $ Set.size s
 evalUnary Length (TermArray s) = pure . LInteger . fromIntegral $ length s
 evalUnary Length (TermMap s) = pure . LInteger . fromIntegral $ Map.size s
 evalUnary Length _ = Left "Only strings, bytes, sets, arrays and maps support `.length()`"
+evalUnary TypeOf (LInteger _) = pure . LString $ "integer"
+evalUnary TypeOf (LString _) = pure . LString $ "string"
+evalUnary TypeOf (LDate _) = pure . LString $ "date"
+evalUnary TypeOf (LBytes _) = pure . LString $ "bytes"
+evalUnary TypeOf (LBool _) = pure . LString $ "bool"
+evalUnary TypeOf (TermSet _) = pure . LString $ "set"
+evalUnary TypeOf (TermArray _) = pure . LString $ "array"
+evalUnary TypeOf (TermMap _) = pure . LString $ "map"
+evalUnary TypeOf LNull = pure . LString $ "null"
+evalUnary TypeOf (Variable v) = absurd v
+evalUnary TypeOf (Antiquote v) = absurd v
 
 evalBinary :: Limits -> Binary -> Value -> Value -> Either String Value
 -- eq / ord operations

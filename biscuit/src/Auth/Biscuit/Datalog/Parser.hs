@@ -361,7 +361,10 @@ binaryMethodParser = do
 unaryMethodParser :: Parser (Expression' 'WithSlices -> Expression' 'WithSlices)
 unaryMethodParser = do
   _ <- C.char '.'
-  method <- Length <$ chunk "length"
+  method <- choice
+            [ Length <$ chunk "length"
+            , TypeOf <$ chunk "type"
+            ]
   _ <- l $ chunk "()"
   pure $ EUnary method
 

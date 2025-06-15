@@ -64,6 +64,9 @@ module Auth.Biscuit.Datalog.AST
   , RuleScope
   , EvalRuleScope
   , SetType
+  , ArrayType
+  , MapType
+  , MapKey (..)
   , Slice (..)
   , PkOrSlice (..)
   , SliceType
@@ -192,6 +195,19 @@ type family SetType (inSet :: IsWithinSet) (ctx :: DatalogContext) where
   SetType 'NotWithinSet ctx = Set (Term' 'WithinSet 'InFact ctx)
   SetType 'WithinSet    ctx = Void
 
+type family ArrayType (inSet:: IsWithinSet) (ctx :: DatalogContext) where
+  ArrayType 'NotWithinSet ctx = [Term' 'NotWithinSet 'InFact ctx]
+  ArrayType 'WithinSet    ctx = Void
+
+data MapKey
+  = IntKey Int64
+  | StringKey Text
+  deriving (Eq, Show, Ord, Lift)
+
+type family MapType (inSet:: IsWithinSet) (ctx :: DatalogContext) where
+  MapType 'NotWithinSet ctx = Map MapKey (Term' 'NotWithinSet 'InFact ctx)
+  MapType 'WithinSet    ctx = Void
+
 type family BlockIdType (evalCtx :: EvaluationContext) (ctx :: DatalogContext) where
   BlockIdType 'Repr 'WithSlices     = PkOrSlice
   BlockIdType 'Repr 'Representation = PublicKey
@@ -219,20 +235,30 @@ data Term' (inSet :: IsWithinSet) (pof :: PredicateOrFact) (ctx :: DatalogContex
   -- ^ A set (eg. @{true, false}@)
   | LNull
   -- ^ @null@
+  | TermArray (ArrayType inSet ctx)
+  -- ^ An array (eg. @[1, true, []]@)
+  | TermMap (MapType inSet ctx)
+  -- ^ A map (eg @{"key": true, 1: null}@)
 
 deriving instance ( Eq (VariableType inSet pof)
                   , Eq (SliceType ctx)
                   , Eq (SetType inSet ctx)
+                  , Eq (ArrayType inSet ctx)
+                  , Eq (MapType inSet ctx)
                   ) => Eq (Term' inSet pof ctx)
 
 deriving instance ( Ord (VariableType inSet pof)
                   , Ord (SliceType ctx)
                   , Ord (SetType inSet ctx)
+                  , Ord (ArrayType inSet ctx)
+                  , Ord (MapType inSet ctx)
                   ) => Ord (Term' inSet pof ctx)
 
 deriving instance ( Show (VariableType inSet pof)
                   , Show (SliceType ctx)
                   , Show (SetType inSet ctx)
+                  , Show (ArrayType inSet ctx)
+                  , Show (MapType inSet ctx)
                   ) => Show (Term' inSet pof ctx)
 
 -- | In a regular AST, slices have already been eliminated
@@ -246,18 +272,22 @@ type SetValue = Term' 'WithinSet 'InFact 'Representation
 
 instance  ( Lift (VariableType inSet pof)
           , Lift (SetType inSet ctx)
+          , Lift (ArrayType inSet ctx)
+          , Lift (MapType inSet ctx)
           , Lift (SliceType ctx)
           )
          => Lift (Term' inSet pof ctx) where
-  lift (Variable n)    = [| Variable n |]
-  lift (LInteger i)    = [| LInteger i |]
-  lift (LString s)     = [| LString s |]
-  lift (LBytes bs)     = [| LBytes bs |]
-  lift (LBool b)       = [| LBool  b |]
-  lift (TermSet terms) = [| TermSet terms |]
-  lift (LDate t)       = [| LDate (read $(lift $ show t)) |]
-  lift LNull           = [| LNull |]
-  lift (Antiquote s)   = [| s |]
+  lift (Variable n)      = [| Variable n |]
+  lift (LInteger i)      = [| LInteger i |]
+  lift (LString s)       = [| LString s |]
+  lift (LBytes bs)       = [| LBytes bs |]
+  lift (LBool b)         = [| LBool  b |]
+  lift (TermSet terms)   = [| TermSet terms |]
+  lift (LDate t)         = [| LDate (read $(lift $ show t)) |]
+  lift LNull             = [| LNull |]
+  lift (Antiquote s)     = [| s |]
+  lift (TermArray terms) = [| TermArray terms |]
+  lift (TermMap terms)   = [| TermMap terms |]
 
 #if MIN_VERSION_template_haskell(2,17,0)
   liftTyped = liftCode . unsafeTExpCoerce . lift
@@ -333,6 +363,8 @@ valueToSetTerm = \case
   LBool i     -> Just $ LBool i
   LNull       -> Just LNull
   TermSet _   -> Nothing
+  TermArray _ -> Nothing
+  TermMap _ -> Nothing
   Variable v  -> absurd v
   Antiquote v -> absurd v
 
@@ -345,6 +377,8 @@ setValueToValue = \case
   LBool i     -> LBool i
   LNull       -> LNull
   TermSet v   -> absurd v
+  TermArray v -> absurd v
+  TermMap v   -> absurd v
   Variable v  -> absurd v
   Antiquote v -> absurd v
 
@@ -357,14 +391,18 @@ valueToTerm = \case
   LBool i     -> LBool i
   LNull       -> LNull
   TermSet i   -> TermSet i
+  TermArray i -> TermArray i
+  TermMap i   -> TermMap i
   Variable v  -> absurd v
   Antiquote v -> absurd v
 
 renderId' :: (VariableType inSet pof -> Text)
           -> (SetType inSet ctx -> Text)
+          -> (ArrayType inSet ctx -> Text)
+          -> (MapType inSet ctx -> Text)
           -> (SliceType ctx -> Text)
           -> Term' inSet pof ctx -> Text
-renderId' var set slice = \case
+renderId' var rset rarray rmap rslice = \case
   Variable name -> var name
   LInteger int  -> pack $ show int
   LString str   -> pack $ show str
@@ -373,8 +411,10 @@ renderId' var set slice = \case
   LBool True    -> "true"
   LBool False   -> "false"
   LNull         -> "null"
-  TermSet terms -> set terms
-  Antiquote v   -> slice v
+  TermSet terms -> rset terms
+  TermArray terms -> rarray terms
+  TermMap terms -> rmap terms
+  Antiquote v   -> rslice v
 
 renderSet :: (SliceType ctx -> Text)
           -> Set (Term' 'WithinSet 'InFact ctx)
@@ -385,11 +425,49 @@ renderSet rslice terms =
   else
     "{" <> intercalate "," (renderId' absurd absurd absurd absurd rslice <$> Set.toList terms) <> "}"
 
+renderArray :: (SliceType ctx -> Text)
+            -> [Term' 'NotWithinSet 'InFact ctx]
+            -> Text
+renderArray rslice terms =
+  let renderElem = renderId'
+        absurd
+        (renderSet rslice)
+        (renderArray rslice)
+        (renderMap rslice)
+        rslice
+   in "[" <> intercalate "," (renderElem <$> terms) <> "]"
+
+renderMap :: (SliceType ctx -> Text)
+          -> Map MapKey (Term' 'NotWithinSet 'InFact ctx)
+          -> Text
+renderMap rslice terms =
+  let renderElem = renderId'
+        absurd
+        (renderSet rslice)
+        (renderArray rslice)
+        (renderMap rslice)
+        rslice
+      renderKey (IntKey k)      = pack $ show k
+      renderKey (StringKey str) = pack $ show str
+      renderEntry (k,v) = renderKey k <> ": " <> renderElem v
+   in "{" <> intercalate "," (renderEntry <$> Map.toList terms) <> "}"
+
 renderId :: Term -> Text
-renderId = renderId' ("$" <>) (renderSet absurd) absurd
+renderId = renderId'
+  ("$" <>)
+  (renderSet absurd)
+  (renderArray absurd)
+  (renderMap absurd)
+  absurd
 
 renderFactId :: Term' 'NotWithinSet 'InFact 'Representation -> Text
-renderFactId = renderId' absurd (renderSet absurd) absurd
+renderFactId =
+  renderId'
+    absurd
+    (renderSet absurd)
+    (renderArray absurd)
+    (renderMap absurd)
+    absurd
 
 listSymbolsInTerm :: Term -> Set.Set Text
 listSymbolsInTerm = \case
@@ -546,9 +624,9 @@ renderQueryItem QueryItem{..} =
 renderCheck :: Check -> Text
 renderCheck Check{..} =
   let keyword = case cKind of
-        CheckOne    -> "check if"
-        CheckAll    -> "check all"
-        Reject -> "reject if"
+        CheckOne -> "check if"
+        CheckAll -> "check all"
+        Reject   -> "reject if"
    in keyword <> " " <>
       intercalate "\n or " (renderQueryItem <$> cQueries)
 
@@ -751,6 +829,7 @@ data Binary =
   | LazyOr
   | All
   | Any
+  | Get
   deriving (Eq, Ord, Show, Lift)
 
 data Expression' (ctx :: DatalogContext) =
@@ -851,6 +930,7 @@ renderExpression =
         EBinary LazyOr e e'         -> rOp "||" e e'
         EBinary All e e'            -> rm "all" e e'
         EBinary Any e e'            -> rm "any" e e'
+        EBinary Get e e'            -> rm "get" e e'
         EClosure ps e               -> rC ps e
 
 -- | A biscuit block, containing facts, rules and checks.
@@ -1174,6 +1254,10 @@ substitutePTerm termMapping = \case
   LNull       -> pure LNull
   TermSet i   ->
     TermSet . Set.fromList <$> traverse (substituteSetTerm termMapping) (Set.toList i)
+  TermArray i ->
+    TermArray <$> traverse (substituteTerm termMapping) i
+  TermMap i ->
+    TermMap <$> traverse (substituteTerm termMapping) i
   Variable i  -> pure $ Variable i
   Antiquote (Slice v) -> maybe (failure v) (pure . valueToTerm) $ termMapping Map.!? v
 
@@ -1189,6 +1273,10 @@ substituteTerm termMapping = \case
   LNull       -> pure LNull
   TermSet i   ->
     TermSet . Set.fromList <$> traverse (substituteSetTerm termMapping) (Set.toList i)
+  TermArray i ->
+    TermArray <$> traverse (substituteTerm termMapping) i
+  TermMap i ->
+    TermMap <$> traverse (substituteTerm termMapping) i
   Variable v  -> absurd v
   Antiquote (Slice v) -> maybe (failure v) pure $ termMapping Map.!? v
 
@@ -1203,6 +1291,8 @@ substituteSetTerm termMapping = \case
   LBool i     -> pure $ LBool i
   LNull       -> pure LNull
   TermSet v   -> absurd v
+  TermArray v -> absurd v
+  TermMap v   -> absurd v
   Variable v  -> absurd v
   Antiquote (Slice v) ->
     let setTerm = valueToSetTerm =<< termMapping Map.!? v

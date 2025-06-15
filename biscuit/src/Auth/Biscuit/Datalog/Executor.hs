@@ -44,11 +44,12 @@ import qualified Data.ByteString          as ByteString
 import           Data.Foldable            (fold)
 import           Data.Functor.Compose     (Compose (..))
 import           Data.Int                 (Int64)
+import qualified Data.List                as List
 import           Data.List.NonEmpty       (NonEmpty)
 import qualified Data.List.NonEmpty       as NE
 import           Data.Map.Strict          (Map, (!?))
 import qualified Data.Map.Strict          as Map
-import           Data.Maybe               (isJust, mapMaybe)
+import           Data.Maybe               (fromMaybe, isJust, mapMaybe)
 import           Data.Set                 (Set)
 import qualified Data.Set                 as Set
 import           Data.Text                (Text, isInfixOf, unpack)
@@ -288,6 +289,8 @@ applyBindings p@Predicate{terms} (origins, bindings) =
       replaceTerm (LBool t)     = Just $ LBool t
       replaceTerm LNull         = Just LNull
       replaceTerm (TermSet t)   = Just $ TermSet t
+      replaceTerm (TermArray t) = Just $ TermArray t
+      replaceTerm (TermMap t)   = Just $ TermMap t
       replaceTerm (Antiquote t) = absurd t
    in (\nt -> (origins, p { terms = nt})) <$> newTerms
 
@@ -382,6 +385,8 @@ applyVariable bindings = \case
   LBool t     -> Right $ LBool t
   LNull       -> Right LNull
   TermSet t   -> Right $ TermSet t
+  TermArray t   -> Right $ TermArray t
+  TermMap t   -> Right $ TermMap t
   Antiquote v -> absurd v
 
 evalUnary :: Unary -> Value -> Either String Value
@@ -391,24 +396,30 @@ evalUnary Negate _ = Left "Only booleans support negation"
 evalUnary Length (LString t) = pure . LInteger . fromIntegral $ ByteString.length $ Text.encodeUtf8 t
 evalUnary Length (LBytes bs) = pure . LInteger . fromIntegral $ ByteString.length bs
 evalUnary Length (TermSet s) = pure . LInteger . fromIntegral $ Set.size s
-evalUnary Length _ = Left "Only strings, bytes and sets support `.length()`"
+evalUnary Length (TermArray s) = pure . LInteger . fromIntegral $ length s
+evalUnary Length (TermMap s) = pure . LInteger . fromIntegral $ Map.size s
+evalUnary Length _ = Left "Only strings, bytes, sets, arrays and maps support `.length()`"
 
 evalBinary :: Limits -> Binary -> Value -> Value -> Either String Value
 -- eq / ord operations
-evalBinary _ Equal (LInteger i) (LInteger i') = pure $ LBool (i == i')
-evalBinary _ Equal (LString t) (LString t')   = pure $ LBool (t == t')
-evalBinary _ Equal (LDate t) (LDate t')       = pure $ LBool (t == t')
-evalBinary _ Equal (LBytes t) (LBytes t')     = pure $ LBool (t == t')
-evalBinary _ Equal (LBool t) (LBool t')       = pure $ LBool (t == t')
-evalBinary _ Equal (TermSet t) (TermSet t')   = pure $ LBool (t == t')
-evalBinary _ Equal _ _                        = Left "Equality mismatch"
-evalBinary _ NotEqual (LInteger i) (LInteger i') = pure $ LBool (i /= i')
-evalBinary _ NotEqual (LString t) (LString t')   = pure $ LBool (t /= t')
-evalBinary _ NotEqual (LDate t) (LDate t')       = pure $ LBool (t /= t')
-evalBinary _ NotEqual (LBytes t) (LBytes t')     = pure $ LBool (t /= t')
-evalBinary _ NotEqual (LBool t) (LBool t')       = pure $ LBool (t /= t')
-evalBinary _ NotEqual (TermSet t) (TermSet t')   = pure $ LBool (t /= t')
-evalBinary _ NotEqual _ _                        = Left "Inequity mismatch"
+evalBinary _ Equal (LInteger i) (LInteger i')   = pure $ LBool (i == i')
+evalBinary _ Equal (LString t) (LString t')     = pure $ LBool (t == t')
+evalBinary _ Equal (LDate t) (LDate t')         = pure $ LBool (t == t')
+evalBinary _ Equal (LBytes t) (LBytes t')       = pure $ LBool (t == t')
+evalBinary _ Equal (LBool t) (LBool t')         = pure $ LBool (t == t')
+evalBinary _ Equal (TermSet t) (TermSet t')     = pure $ LBool (t == t')
+evalBinary _ Equal (TermArray t) (TermArray t') = pure $ LBool (t == t')
+evalBinary _ Equal (TermMap t) (TermMap t')     = pure $ LBool (t == t')
+evalBinary _ Equal _ _                          = Left "Equality mismatch"
+evalBinary _ NotEqual (LInteger i) (LInteger i')   = pure $ LBool (i /= i')
+evalBinary _ NotEqual (LString t) (LString t')     = pure $ LBool (t /= t')
+evalBinary _ NotEqual (LDate t) (LDate t')         = pure $ LBool (t /= t')
+evalBinary _ NotEqual (LBytes t) (LBytes t')       = pure $ LBool (t /= t')
+evalBinary _ NotEqual (LBool t) (LBool t')         = pure $ LBool (t /= t')
+evalBinary _ NotEqual (TermSet t) (TermSet t')     = pure $ LBool (t /= t')
+evalBinary _ NotEqual (TermArray t) (TermArray t') = pure $ LBool (t /= t')
+evalBinary _ NotEqual (TermMap t) (TermMap t')     = pure $ LBool (t /= t')
+evalBinary _ NotEqual _ _                          = Left "Inequity mismatch"
 evalBinary _ HeterogeneousEqual t t'             = pure $ LBool (t == t')
 evalBinary _ HeterogeneousNotEqual t t'          = pure $ LBool (t /= t')
 evalBinary _ LessThan (LInteger i) (LInteger i') = pure $ LBool (i < i')
@@ -425,8 +436,10 @@ evalBinary _ GreaterOrEqual (LDate t) (LDate t')       = pure $ LBool (t >= t')
 evalBinary _ GreaterOrEqual _ _                        = Left ">= mismatch"
 -- string-related operations
 evalBinary _ Prefix (LString t) (LString t') = pure $ LBool (t' `Text.isPrefixOf` t)
-evalBinary _ Prefix _ _                      = Left "Only strings support `.starts_with()`"
+evalBinary _ Prefix (TermArray t) (TermArray t') = pure . LBool $ t' `List.isPrefixOf` t
+evalBinary _ Prefix _ _                      = Left "Only strings and arrays support `.starts_with()`"
 evalBinary _ Suffix (LString t) (LString t') = pure $ LBool (t' `Text.isSuffixOf` t)
+evalBinary _ Suffix (TermArray t) (TermArray t') = pure . LBool $ t' `List.isSuffixOf` t
 evalBinary _ Suffix _ _                      = Left "Only strings support `.ends_with()`"
 evalBinary Limits{allowRegexes} Regex  (LString t) (LString r) | allowRegexes = regexMatch t r
                                                                | otherwise    = Left "Regex evaluation is disabled"
@@ -462,11 +475,22 @@ evalBinary _ Contains (TermSet t) t' = case valueToSetTerm t' of
     Just t'' -> pure $ LBool (Set.member t'' t)
     Nothing  -> Left "Sets cannot contain nested sets nor variables"
 evalBinary _ Contains (LString t) (LString t') = pure $ LBool (t' `isInfixOf` t)
+evalBinary _ Contains (TermArray t) t' = pure . LBool $ t' `elem` t
+evalBinary _ Contains (TermMap t) (LInteger i) = pure . LBool $ IntKey i `Map.member` t
+evalBinary _ Contains (TermMap t) (LString s) = pure . LBool $ StringKey s `Map.member` t
+evalBinary _ Contains (TermMap _) _ = pure $ LBool False
 evalBinary _ Contains _ _ = Left "Only sets and strings support `.contains()`"
 evalBinary _ Intersection (TermSet t) (TermSet t') = pure $ TermSet (Set.intersection t t')
-evalBinary _ Intersection e e' = Left "Only sets support `.intersection()`"
+evalBinary _ Intersection _ _ = Left "Only sets support `.intersection()`"
 evalBinary _ Union (TermSet t) (TermSet t') = pure $ TermSet (Set.union t t')
 evalBinary _ Union _ _ = Left "Only sets support `.union()`"
+evalBinary _ Get (TermArray t) (LInteger i) = pure $
+  if i < List.genericLength t
+  then List.genericIndex t i
+  else LNull
+evalBinary _ Get (TermMap t) (LInteger i) = pure . fromMaybe LNull $ t !? IntKey i
+evalBinary _ Get (TermMap t) (LString s) = pure . fromMaybe LNull $ t !? StringKey s
+evalBinary _ Get _ _ = Left "Only arrays and maps support `.get()`"
 evalBinary _ Any _ _ = Left "internal error: leftover .any()"
 evalBinary _ All _ _ = Left "internal error: leftover .all()"
 
@@ -497,12 +521,18 @@ evaluateAll l b xs' (EClosure [p] e) =
         if Map.member p b
             then Left "Shadowed variable"
             else Right ()
-        evaluateExpression l (Map.insert p (setValueToValue v) b) e >>= \case
+        evaluateExpression l (Map.insert p v b) e >>= \case
           LBool x -> Right x
           _ -> Left "Expected boolean"
+      makeArray :: (MapKey, Value) -> Value
+      makeArray (k,v) = case k of
+        IntKey i    -> TermArray [LInteger i, v]
+        StringKey s -> TermArray [LString s, v]
    in case xs' of
-    TermSet xs -> LBool <$> allM runClosure xs
-    _ -> Left "Only sets support .all()"
+    TermSet xs   -> LBool <$> allM (runClosure . setValueToValue) xs
+    TermArray xs -> LBool <$> allM runClosure xs
+    TermMap xs   -> LBool <$> allM (runClosure . makeArray) (Map.toList xs)
+    _            -> Left "Only sets, arrays and maps support .all()"
 evaluateAll _ _ _  _ = Left "Expected closure"
 
 evaluateAny :: Limits
@@ -515,12 +545,18 @@ evaluateAny l b xs' (EClosure [p] e) =
         if Map.member p b
             then Left "Shadowed variable"
             else Right ()
-        evaluateExpression l (Map.insert p (setValueToValue v) b) e >>= \case
+        evaluateExpression l (Map.insert p v b) e >>= \case
           LBool x -> Right x
           _ -> Left "Expected boolean"
+      makeArray :: (MapKey, Value) -> Value
+      makeArray (k,v) = case k of
+        IntKey i    -> TermArray [LInteger i, v]
+        StringKey s -> TermArray [LString s, v]
    in case xs' of
-    TermSet xs -> LBool <$> anyM runClosure xs
-    _ -> Left "Only sets support .any()"
+    TermSet xs   -> LBool <$> anyM (runClosure . setValueToValue) xs
+    TermArray xs -> LBool <$> anyM runClosure xs
+    TermMap xs   -> LBool <$> anyM (runClosure . makeArray) (Map.toList xs)
+    _            -> Left "Only sets, arrays and maps support .any()"
 evaluateAny _ _ _  _ = Left "Expected closure"
 
 evaluateLazyAnd :: Limits

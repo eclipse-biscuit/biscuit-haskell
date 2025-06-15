@@ -29,6 +29,10 @@ module Auth.Biscuit.Proto
   , TermV2 (..)
   , ExpressionV2 (..)
   , TermSet (..)
+  , TermArray (..)
+  , TermMap (..)
+  , MapKey (..)
+  , MapEntry (..)
   , Empty (..)
   , Op (..)
   , OpUnary (..)
@@ -153,14 +157,16 @@ data PredicateV2 = PredicateV2
     deriving anyclass (Decode, Encode)
 
 data TermV2 =
-    TermVariable (Required 1 (Value Int64))
-  | TermInteger  (Required 2 (Value Int64))
-  | TermString   (Required 3 (Value Int64))
-  | TermDate     (Required 4 (Value Int64))
-  | TermBytes    (Required 5 (Value ByteString))
-  | TermBool     (Required 6 (Value Bool))
-  | TermTermSet  (Required 7 (Message TermSet))
-  | TermNull     (Required 8 (Message Empty))
+    TermVariable  (Required 1  (Value Int64))
+  | TermInteger   (Required 2  (Value Int64))
+  | TermString    (Required 3  (Value Int64))
+  | TermDate      (Required 4  (Value Int64))
+  | TermBytes     (Required 5  (Value ByteString))
+  | TermBool      (Required 6  (Value Bool))
+  | TermTermSet   (Required 7  (Message TermSet))
+  | TermNull      (Required 8  (Message Empty))
+  | TermTermArray (Required 9  (Message TermArray))
+  | TermTermMap   (Required 10 (Message TermMap))
     deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -171,6 +177,28 @@ data Empty = Empty {}
 
 newtype TermSet = TermSet
   { set :: Repeated 1 (Message TermV2)
+  } deriving stock (Generic, Show)
+    deriving anyclass (Decode, Encode)
+
+newtype TermArray = TermArray
+  { array :: Repeated 1 (Message TermV2)
+  } deriving stock (Generic, Show)
+    deriving anyclass (Decode, Encode)
+
+data MapKey =
+    MapKeyInt    (Required 1 (Value Int64))
+  | MapKeyString (Required 2 (Value Int64))
+    deriving stock (Generic, Show)
+    deriving anyclass (Decode, Encode)
+
+data MapEntry = MapEntry
+  { key   ::   Required 1 (Message MapKey)
+  , value :: Required 2 (Message TermV2)
+  } deriving stock (Generic, Show)
+    deriving anyclass (Decode, Encode)
+
+newtype TermMap = TermMap
+  { map :: Repeated 1 (Message MapEntry)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -223,6 +251,7 @@ data BinaryKind =
   | LazyOr
   | All
   | Any
+  | Get
   deriving stock (Show, Enum, Bounded)
 
 newtype OpBinary = OpBinary
@@ -232,7 +261,7 @@ newtype OpBinary = OpBinary
 
 data OpClosure = OpClosure
   { params :: Repeated 1 (Value Int64)
-  , ops :: Repeated 2 (Message Op)
+  , ops    :: Repeated 2 (Message Op)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 

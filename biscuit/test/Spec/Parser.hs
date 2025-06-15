@@ -114,7 +114,7 @@ termsGroupQQ = testGroup "Parse terms (in a QQ setting)"
      [ testCase "Variable name" $ parseTermQQ "{toto2_'}" @?= Right (Antiquote "toto2_'")
      , testCase "Leading underscore" $ parseTermQQ "{_toto}" @?= Right (Antiquote "_toto")
      , testCase "`_` is reserved" $ parseTermQQ "{_}" @?= Left "1:3:\n  |\n1 | {_}\n  |   ^\nunexpected '}'\nexpecting letter\n"
-     , testCase "Variables are lower-cased" $ parseTermQQ "{Toto}" @?= Left "1:2:\n  |\n1 | {Toto}\n  |  ^^^^^\nunexpected \"Toto}\"\nexpecting '_', lowercase letter, or set (eg. {1,2,3})\n"
+     , testCase "Variables are lower-cased" $ parseTermQQ "{Toto}" @?= Left "1:2:\n  |\n1 | {Toto}\n  |  ^^^^^\nunexpected \"Toto}\"\nexpecting '_', lowercase letter, map (eg. {\"key\": 1}), or set (eg. {1,2,3})\n"
      , testCase "_ is lower-case" $ parseTermQQ "{_Toto}" @?= Right (Antiquote "_Toto")
      , testCase "unicode is allowed" $ parseTermQQ "{éllo}" @?= Right (Antiquote "éllo")
      ]

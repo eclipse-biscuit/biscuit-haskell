@@ -32,6 +32,7 @@ import           Data.Bitraversable       (bitraverse)
 import           Data.ByteString          (ByteString)
 import           Data.Int                 (Int64)
 import qualified Data.List.NonEmpty       as NE
+import qualified Data.Map                 as Map
 import           Data.Maybe               (isJust, isNothing)
 import qualified Data.Set                 as Set
 import qualified Data.Text                as T
@@ -312,6 +313,8 @@ pbToTerm s = \case
   PB.TermBool     f -> pure $ LBool    $ PB.getField f
   PB.TermVariable f -> Variable <$> getSymbol s (SymbolRef $ PB.getField f)
   PB.TermTermSet  f -> TermSet . Set.fromList <$> traverse (pbToSetValue s) (PB.getField . PB.set $ PB.getField f)
+  PB.TermTermArray f -> TermArray <$> traverse (pbToValue s) (PB.getField . PB.array $ PB.getField f)
+  PB.TermTermMap f -> TermMap . Map.fromList <$> traverse (pbToMapEntry s) (PB.getField . PB.map $ PB.getField f)
   PB.TermNull     _ -> pure LNull
 
 termToPb :: ReverseSymbols -> Term -> PB.TermV2
@@ -323,9 +326,27 @@ termToPb s = \case
   LBytes   v -> PB.TermBytes    $ PB.putField v
   LBool    v -> PB.TermBool     $ PB.putField v
   TermSet vs -> PB.TermTermSet  $ PB.putField $ PB.TermSet $ PB.putField $ setValueToPb s <$> Set.toList vs
+  TermArray vs -> PB.TermTermArray $ PB.putField $ PB.TermArray $ PB.putField $ valueToPb s <$> vs
+  TermMap vs -> PB.TermTermMap $ PB.putField $ PB.TermMap $ PB.putField $ uncurry (mapEntryToPb s) <$> Map.toList vs
   LNull      -> PB.TermNull     $ PB.putField $ PB.Empty {}
 
   Antiquote v -> absurd v
+
+mapEntryToPb :: ReverseSymbols -> MapKey -> Value -> PB.MapEntry
+mapEntryToPb s k v = PB.MapEntry
+  { key = PB.putField $ case k of
+      IntKey i    -> PB.MapKeyInt . PB.putField $ fromIntegral i
+      StringKey n -> PB.MapKeyString . PB.putField $ getSymbolRef $ getSymbolCode s n
+  , value = PB.putField $ valueToPb s v
+  }
+
+pbToMapEntry :: Symbols -> PB.MapEntry -> Either String (MapKey, Value)
+pbToMapEntry s PB.MapEntry{key,value} = do
+  k <- case PB.getField key of
+         PB.MapKeyInt i    -> pure . IntKey . fromIntegral $ PB.getField i
+         PB.MapKeyString i -> StringKey <$> getSymbol s (SymbolRef $ PB.getField i)
+  v <- pbToValue s $ PB.getField value
+  pure (k, v)
 
 pbToValue :: Symbols -> PB.TermV2 -> Either String Value
 pbToValue s = \case
@@ -336,6 +357,8 @@ pbToValue s = \case
   PB.TermBool     f -> pure $ LBool    $ PB.getField f
   PB.TermVariable _ -> Left "Variables can't appear in facts"
   PB.TermTermSet  f -> TermSet . Set.fromList <$> traverse (pbToSetValue s) (PB.getField . PB.set $ PB.getField f)
+  PB.TermTermArray f -> TermArray <$> traverse (pbToValue s) (PB.getField . PB.array $ PB.getField f)
+  PB.TermTermMap f -> TermMap . Map.fromList <$> traverse (pbToMapEntry s) (PB.getField . PB.map $ PB.getField f)
   PB.TermNull     _ -> pure LNull
 
 valueToPb :: ReverseSymbols -> Value -> PB.TermV2
@@ -346,6 +369,8 @@ valueToPb s = \case
   LBytes   v -> PB.TermBytes   $ PB.putField v
   LBool    v -> PB.TermBool    $ PB.putField v
   TermSet vs -> PB.TermTermSet $ PB.putField $ PB.TermSet $ PB.putField $ setValueToPb s <$> Set.toList vs
+  TermArray vs -> PB.TermTermArray $ PB.putField $ PB.TermArray $ PB.putField $ valueToPb s <$> vs
+  TermMap vs -> PB.TermTermMap $ PB.putField $ PB.TermMap $ PB.putField $ uncurry (mapEntryToPb s) <$> Map.toList vs
   LNull      -> PB.TermNull $ PB.putField PB.Empty
 
   Variable v  -> absurd v
@@ -361,6 +386,8 @@ pbToSetValue s = \case
   PB.TermNull     _ -> pure LNull
   PB.TermVariable _ -> Left "Variables can't appear in facts or sets"
   PB.TermTermSet  _ -> Left "Sets can't be nested"
+  PB.TermTermArray _ -> Left "Arrays can’t appear in sets"
+  PB.TermTermMap _ -> Left "Maps can’t appear in sets"
 
 setValueToPb :: ReverseSymbols -> Term' 'WithinSet 'InFact 'Representation -> PB.TermV2
 setValueToPb s = \case
@@ -372,6 +399,8 @@ setValueToPb s = \case
   LNull      -> PB.TermNull     $ PB.putField $ PB.Empty {}
 
   TermSet   v -> absurd v
+  TermArray v -> absurd v
+  TermMap   v -> absurd v
   Variable  v -> absurd v
   Antiquote v -> absurd v
 
@@ -436,10 +465,11 @@ pbToBinary PB.OpBinary{kind} = case PB.getField kind of
   PB.NotEqual              -> NotEqual
   PB.HeterogeneousEqual    -> HeterogeneousEqual
   PB.HeterogeneousNotEqual -> HeterogeneousNotEqual
-  PB.LazyAnd -> LazyAnd
-  PB.LazyOr  -> LazyOr
-  PB.All     -> All
-  PB.Any     -> Any
+  PB.LazyAnd               -> LazyAnd
+  PB.LazyOr                -> LazyOr
+  PB.All                   -> All
+  PB.Any                   -> Any
+  PB.Get                   -> Get
 
 binaryToPb :: Binary -> PB.OpBinary
 binaryToPb = PB.OpBinary . PB.putField . \case
@@ -470,6 +500,7 @@ binaryToPb = PB.OpBinary . PB.putField . \case
   LazyOr  -> PB.LazyOr
   All     -> PB.All
   Any     -> PB.Any
+  Get     -> PB.Get
 
 pbToClosure :: Symbols -> PB.OpClosure -> Either String ([T.Text], [Op])
 pbToClosure s PB.OpClosure{..} =

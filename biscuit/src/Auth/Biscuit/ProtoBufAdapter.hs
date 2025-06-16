@@ -482,6 +482,7 @@ pbToBinary s PB.OpBinary{kind, ffiName} =
         PB.All                   -> Right All
         PB.Any                   -> Right Any
         PB.Get                   -> Right Get
+        PB.Try                   -> Right Try
         PB.BinaryFfi -> do
           nameIdx <- maybeToRight "Missing extern call name" $ PB.getField ffiName
           name' <- getSymbol s $ SymbolRef nameIdx
@@ -529,6 +530,7 @@ binaryToPb s = \case
   Any -> PB.OpBinary { kind = PB.putField PB.Any, ffiName = PB.putField Nothing }
   All -> PB.OpBinary { kind = PB.putField PB.All, ffiName = PB.putField Nothing }
   Get -> PB.OpBinary { kind = PB.putField PB.Get, ffiName = PB.putField Nothing }
+  Try -> PB.OpBinary { kind = PB.putField PB.Try, ffiName = PB.putField Nothing }
   BinaryFfi n -> PB.OpBinary
     { kind = PB.putField PB.BinaryFfi
     , ffiName = PB.putField . Just . getSymbolRef $ getSymbolCode s n

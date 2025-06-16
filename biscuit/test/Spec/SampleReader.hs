@@ -230,7 +230,7 @@ processTestCase :: (String -> IO ())
                 -> Assertion
 processTestCase step rootPk TestCase{..}
   | fst filename == "test018_unbound_variables_in_rule.bc" = step "Skipping for now (unbound variables are now caught before evaluation)"
-  | fst filename `elem` ["test036_secp256r1.bc", "test037_secp256r1_third_party.bc", "test038_try_op.bc"] = step "Skipping for now (not supported yet)"
+  | fst filename `elem` ["test036_secp256r1.bc", "test037_secp256r1_third_party.bc"] = step "Skipping for now (not supported yet)"
   | otherwise = do
     step "Parsing "
     let vList = Map.toList validations

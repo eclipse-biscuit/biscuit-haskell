@@ -353,6 +353,7 @@ binaryMethodParser = do
     , All          <$ chunk "all"
     , Get          <$ chunk "get"
     , BinaryFfi    <$> (chunk "extern::" *> identifierParser)
+    , Try          <$ chunk "try_or"
     ]
   _ <- l $ C.char '('
   e2 <- case method of
@@ -360,7 +361,9 @@ binaryMethodParser = do
     All -> uncurry EClosure . first pure <$> l closureParser
     _   -> l expressionParser
   _ <- l $ C.char ')'
-  pure $ \e1 -> EBinary method e1 e2
+  pure $ \e1 -> case method of
+    Try -> EBinary method (EClosure [] e1) e2
+    _   -> EBinary method e1 e2
 
 unaryMethodParser :: Parser (Expression' 'WithSlices -> Expression' 'WithSlices)
 unaryMethodParser = do

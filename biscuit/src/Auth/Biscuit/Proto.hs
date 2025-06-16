@@ -254,6 +254,7 @@ data BinaryKind =
   | Any
   | Get
   | BinaryFfi
+  | Try
   deriving stock (Show, Enum, Bounded)
 
 data OpBinary = OpBinary

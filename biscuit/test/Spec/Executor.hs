@@ -170,6 +170,7 @@ exprEval = do
     , ("{1}.intersection({\"test\"})", TermSet (Set.fromList []))
     , ("{1}.union({1})", TermSet (Set.fromList [LInteger 1]))
     , ("{1}.union({\"test\"})", TermSet (Set.fromList [LInteger 1, LString "test"]))
+    , ("(true === 12).try_or(42)", LInteger 42)
     ]
 
 exprEvalError :: TestTree
@@ -186,6 +187,7 @@ exprEvalError = do
     , ("\"toto\".matches(\"to\")", "Regex evaluation is disabled")
     , ("9223372036854775807 + 1", "integer overflow")
     , ("-9223372036854775808 - 1", "integer underflow")
+    , ("true.try_or(true === 12)", "Equality mismatch") -- the right-hand-side of try_or is eager
     ]
 
 rulesWithConstraints :: TestTree

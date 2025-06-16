@@ -227,14 +227,10 @@ checkTokenBlocks step b blockDescs = do
 processTestCase :: (String -> IO ())
                 -> PublicKey -> TestCase (FilePath, ByteString)
                 -> Assertion
-processTestCase step rootPk TestCase{..} =
-  if fst filename == "test018_unbound_variables_in_rule.bc"
-  then
-    step "Skipping for now (unbound variables are now caught before evaluation)"
-  else if fst filename `elem` ["test035_ffi.bc", "test036_secp256r1.bc", "test037_secp256r1_third_party.bc", "test038_try_op.bc"]
-  then
-    step "Skipping for now (not supported yet)"
-  else do
+processTestCase step rootPk TestCase{..}
+  | fst filename == "test018_unbound_variables_in_rule.bc" = step "Skipping for now (unbound variables are now caught before evaluation)"
+  | fst filename `elem` ["test035_ffi.bc", "test036_secp256r1.bc", "test037_secp256r1_third_party.bc", "test038_try_op.bc"] = step "Skipping for now (not supported yet)"
+  | otherwise = do
     step "Parsing "
     let vList = Map.toList validations
     case parse rootPk (snd filename) of

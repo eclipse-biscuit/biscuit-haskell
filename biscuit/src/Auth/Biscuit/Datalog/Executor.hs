@@ -535,6 +535,7 @@ evalBinary _ Get (TermMap t) (LString s) = pure . fromMaybe LNull $ t !? StringK
 evalBinary _ Get _ _ = Left "Only arrays and maps support `.get()`"
 evalBinary _ Any _ _ = Left "internal error: leftover .any()"
 evalBinary _ All _ _ = Left "internal error: leftover .all()"
+evalBinary _ Try _ _ = Left "internal error: leftover .try_or()"
 evalBinary Limits{externFuncs} (BinaryFfi n) l r = runExternFunc externFuncs n l (Just r)
 
 checkedOp :: (Integer -> Integer -> Integer)
@@ -636,6 +637,18 @@ evaluateLazyOr l b lhs' (EClosure [] e) =
         _ -> Left "Expected boolean"
 evaluateLazyOr _ _ _  _ = Left "Expected closure"
 
+evaluateTry :: Limits
+            -> Bindings
+            -> Expression
+            -> Expression
+            -> Either String Value
+evaluateTry l b (EClosure [] e) e' = do
+  rhs <- evaluateExpression l b e'
+  case evaluateExpression l b e of
+    Right r -> Right r
+    Left _  -> Right rhs
+evaluateTry _ _ _ _                = Left "Expected closure"
+
 -- | Given bindings for variables, reduce an expression to a single
 -- datalog value
 evaluateExpression :: Limits
@@ -657,5 +670,6 @@ evaluateExpression l b = \case
     EBinary All e e' -> do
         lhs <- evaluateExpression l b e
         evaluateAll l b lhs e'
+    EBinary Try e e' -> evaluateTry l b e e'
     EBinary op e e' -> uncurry (evalBinary l op) =<< join bitraverse (evaluateExpression l b) (e, e')
     EClosure _ _ -> Left "Unexpected closure"

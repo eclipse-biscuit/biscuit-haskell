@@ -833,6 +833,7 @@ data Binary =
   | Any
   | Get
   | BinaryFfi Text
+  | Try
   deriving (Eq, Ord, Show, Lift)
 
 data Expression' (ctx :: DatalogContext) =
@@ -937,6 +938,7 @@ renderExpression =
         EBinary Any e e'            -> rm "any" e e'
         EBinary Get e e'            -> rm "get" e e'
         EBinary (BinaryFfi n) e e'  -> rm ("extern::" <> n) e e'
+        EBinary Try e e'            -> rm "try_or" e e'
         EClosure ps e               -> rC ps e
 
 -- | A biscuit block, containing facts, rules and checks.

@@ -20,6 +20,8 @@ module Auth.Biscuit.Datalog.Executor
   , ResultError (..)
   , Bindings
   , Name
+  , ExternFuncs
+  , ExternFunc (..)
   , MatchedQuery (..)
   , Scoped
   , FactGroup (..)
@@ -28,6 +30,9 @@ module Auth.Biscuit.Datalog.Executor
   , fromScopedFacts
   , keepAuthorized'
   , defaultLimits
+  , setExternFuncs
+  , withExternFunc
+  , withExternFuncs
   , evaluateExpression
   --
   , getFactsForRule
@@ -44,11 +49,12 @@ import qualified Data.ByteString          as ByteString
 import           Data.Foldable            (fold)
 import           Data.Functor.Compose     (Compose (..))
 import           Data.Int                 (Int64)
+import qualified Data.List                as List
 import           Data.List.NonEmpty       (NonEmpty)
 import qualified Data.List.NonEmpty       as NE
 import           Data.Map.Strict          (Map, (!?))
 import qualified Data.Map.Strict          as Map
-import           Data.Maybe               (isJust, mapMaybe)
+import           Data.Maybe               (fromMaybe, isJust, mapMaybe)
 import           Data.Set                 (Set)
 import qualified Data.Set                 as Set
 import           Data.Text                (Text, isInfixOf, unpack)
@@ -68,6 +74,21 @@ type Name = Text
 
 -- | A list of bound variables, with the associated value
 type Bindings  = Map Name Value
+
+newtype ExternFunc = ExternFunc (Value -> Maybe Value -> Either String Value)
+
+instance Show ExternFunc where
+  show _ = "<extern func>"
+
+instance Eq ExternFunc where
+  _ == _ = True
+
+type ExternFuncs = Map Text ExternFunc
+
+runExternFunc :: ExternFuncs -> Text -> Value -> Maybe Value -> Either String Value
+runExternFunc ef name a1 a2 = do
+  ExternFunc func <- maybeToRight ("undefined external func " <> unpack name) $ ef !? name
+  func a1 a2
 
 -- | A datalog query that was matched, along with the values
 -- that matched
@@ -123,6 +144,7 @@ data Limits
   , allowRegexes  :: Bool
   -- ^ whether or not allowing `.matches()` during verification (untrusted regex computation
   -- can enable DoS attacks). This security risk is mitigated by the 'maxTime' setting.
+  , externFuncs   :: ExternFuncs
   }
   deriving (Eq, Show)
 
@@ -131,14 +153,23 @@ data Limits
 --   - 100 iterations
 --   - 1000μs max
 --   - regexes are allowed
---   - facts and rules are allowed in blocks
 defaultLimits :: Limits
 defaultLimits = Limits
   { maxFacts = 1000
   , maxIterations = 100
   , maxTime = 1000
   , allowRegexes = True
+  , externFuncs = mempty
   }
+
+withExternFunc :: Text -> (Value -> Maybe Value -> Either String Value) -> Limits -> Limits
+withExternFunc n f l@Limits{externFuncs} = l { externFuncs = Map.insert n (ExternFunc f) externFuncs }
+
+withExternFuncs :: Map Text (Value -> Maybe Value -> Either String Value) -> Limits -> Limits
+withExternFuncs fs l@Limits{externFuncs} = l { externFuncs = Map.union (ExternFunc <$> fs) externFuncs }
+
+setExternFuncs :: Map Text (Value -> Maybe Value -> Either String Value) -> Limits -> Limits
+setExternFuncs fs l = l { externFuncs = ExternFunc <$> fs }
 
 type Scoped a = (Set Natural, a)
 
@@ -191,13 +222,25 @@ countFacts (FactGroup facts) = sum $ Set.size <$> Map.elems facts
 
 checkCheck :: Limits -> Natural -> Natural -> FactGroup -> EvalCheck -> Either String (Validation (NonEmpty Check) ())
 checkCheck l blockCount checkBlockId facts c@Check{cQueries,cKind} = do
-  let isQueryItemOk = case cKind of
-        One -> isQueryItemSatisfied l blockCount checkBlockId facts
-        All -> isQueryItemSatisfiedForAllMatches l blockCount checkBlockId facts
-  hasOkQueryItem <- anyM (fmap isJust . isQueryItemOk) cQueries
-  pure $ if hasOkQueryItem
-         then Success ()
-         else failure (toRepresentation c)
+  let queryMatchesOne = isQueryItemSatisfied l blockCount checkBlockId facts
+  let queryMatchesAll = isQueryItemSatisfiedForAllMatches l blockCount checkBlockId facts
+
+  case cKind of
+    CheckOne -> do
+       hasOkQueryItem <- anyM (fmap isJust . queryMatchesOne) cQueries
+       pure $ if hasOkQueryItem
+              then Success ()
+              else failure (toRepresentation c)
+    CheckAll -> do
+       hasOkQueryItem <- anyM (fmap isJust . queryMatchesAll) cQueries
+       pure $ if hasOkQueryItem
+              then Success ()
+              else failure (toRepresentation c)
+    Reject -> do
+       hasOkQueryItem <- anyM (fmap isJust . queryMatchesOne) cQueries
+       pure $ if not hasOkQueryItem
+              then Success ()
+              else failure (toRepresentation c)
 
 checkPolicy :: Limits -> Natural -> FactGroup -> EvalPolicy -> Either String (Maybe (Either MatchedQuery MatchedQuery))
 checkPolicy l blockCount facts (pType, query) = do
@@ -274,7 +317,10 @@ applyBindings p@Predicate{terms} (origins, bindings) =
       replaceTerm (LDate t)     = Just $ LDate t
       replaceTerm (LBytes t)    = Just $ LBytes t
       replaceTerm (LBool t)     = Just $ LBool t
+      replaceTerm LNull         = Just LNull
       replaceTerm (TermSet t)   = Just $ TermSet t
+      replaceTerm (TermArray t) = Just $ TermArray t
+      replaceTerm (TermMap t)   = Just $ TermMap t
       replaceTerm (Antiquote t) = absurd t
    in (\nt -> (origins, p { terms = nt})) <$> newTerms
 
@@ -329,6 +375,7 @@ isSame (LDate t)    (LDate t')    = t == t'
 isSame (LBytes t)   (LBytes t')   = t == t'
 isSame (LBool t)    (LBool t')    = t == t'
 isSame (TermSet t)  (TermSet t')  = t == t'
+isSame LNull        LNull         = True
 isSame _ _                        = False
 
 -- | Given a predicate and a fact, try to match the fact to the predicate,
@@ -366,34 +413,57 @@ applyVariable bindings = \case
   LDate t     -> Right $ LDate t
   LBytes t    -> Right $ LBytes t
   LBool t     -> Right $ LBool t
+  LNull       -> Right LNull
   TermSet t   -> Right $ TermSet t
+  TermArray t   -> Right $ TermArray t
+  TermMap t   -> Right $ TermMap t
   Antiquote v -> absurd v
 
-evalUnary :: Unary -> Value -> Either String Value
-evalUnary Parens t = pure t
-evalUnary Negate (LBool b) = pure (LBool $ not b)
-evalUnary Negate _ = Left "Only booleans support negation"
-evalUnary Length (LString t) = pure . LInteger . fromIntegral $ ByteString.length $ Text.encodeUtf8 t
-evalUnary Length (LBytes bs) = pure . LInteger . fromIntegral $ ByteString.length bs
-evalUnary Length (TermSet s) = pure . LInteger . fromIntegral $ Set.size s
-evalUnary Length _ = Left "Only strings, bytes and sets support `.length()`"
+evalUnary :: Limits -> Unary -> Value -> Either String Value
+evalUnary _ Parens t = pure t
+evalUnary _ Negate (LBool b) = pure (LBool $ not b)
+evalUnary _ Negate _ = Left "Only booleans support negation"
+evalUnary _ Length (LString t) = pure . LInteger . fromIntegral $ ByteString.length $ Text.encodeUtf8 t
+evalUnary _ Length (LBytes bs) = pure . LInteger . fromIntegral $ ByteString.length bs
+evalUnary _ Length (TermSet s) = pure . LInteger . fromIntegral $ Set.size s
+evalUnary _ Length (TermArray s) = pure . LInteger . fromIntegral $ length s
+evalUnary _ Length (TermMap s) = pure . LInteger . fromIntegral $ Map.size s
+evalUnary _ Length _ = Left "Only strings, bytes, sets, arrays and maps support `.length()`"
+evalUnary _ TypeOf (LInteger _) = pure . LString $ "integer"
+evalUnary _ TypeOf (LString _) = pure . LString $ "string"
+evalUnary _ TypeOf (LDate _) = pure . LString $ "date"
+evalUnary _ TypeOf (LBytes _) = pure . LString $ "bytes"
+evalUnary _ TypeOf (LBool _) = pure . LString $ "bool"
+evalUnary _ TypeOf (TermSet _) = pure . LString $ "set"
+evalUnary _ TypeOf (TermArray _) = pure . LString $ "array"
+evalUnary _ TypeOf (TermMap _) = pure . LString $ "map"
+evalUnary _ TypeOf LNull = pure . LString $ "null"
+evalUnary _ TypeOf (Variable v) = absurd v
+evalUnary _ TypeOf (Antiquote v) = absurd v
+evalUnary Limits{externFuncs} (UnaryFfi n) v = runExternFunc externFuncs n v Nothing
 
 evalBinary :: Limits -> Binary -> Value -> Value -> Either String Value
 -- eq / ord operations
-evalBinary _ Equal (LInteger i) (LInteger i') = pure $ LBool (i == i')
-evalBinary _ Equal (LString t) (LString t')   = pure $ LBool (t == t')
-evalBinary _ Equal (LDate t) (LDate t')       = pure $ LBool (t == t')
-evalBinary _ Equal (LBytes t) (LBytes t')     = pure $ LBool (t == t')
-evalBinary _ Equal (LBool t) (LBool t')       = pure $ LBool (t == t')
-evalBinary _ Equal (TermSet t) (TermSet t')   = pure $ LBool (t == t')
-evalBinary _ Equal _ _                        = Left "Equality mismatch"
-evalBinary _ NotEqual (LInteger i) (LInteger i') = pure $ LBool (i /= i')
-evalBinary _ NotEqual (LString t) (LString t')   = pure $ LBool (t /= t')
-evalBinary _ NotEqual (LDate t) (LDate t')       = pure $ LBool (t /= t')
-evalBinary _ NotEqual (LBytes t) (LBytes t')     = pure $ LBool (t /= t')
-evalBinary _ NotEqual (LBool t) (LBool t')       = pure $ LBool (t /= t')
-evalBinary _ NotEqual (TermSet t) (TermSet t')   = pure $ LBool (t /= t')
-evalBinary _ NotEqual _ _                        = Left "Inequity mismatch"
+evalBinary _ Equal (LInteger i) (LInteger i')   = pure $ LBool (i == i')
+evalBinary _ Equal (LString t) (LString t')     = pure $ LBool (t == t')
+evalBinary _ Equal (LDate t) (LDate t')         = pure $ LBool (t == t')
+evalBinary _ Equal (LBytes t) (LBytes t')       = pure $ LBool (t == t')
+evalBinary _ Equal (LBool t) (LBool t')         = pure $ LBool (t == t')
+evalBinary _ Equal (TermSet t) (TermSet t')     = pure $ LBool (t == t')
+evalBinary _ Equal (TermArray t) (TermArray t') = pure $ LBool (t == t')
+evalBinary _ Equal (TermMap t) (TermMap t')     = pure $ LBool (t == t')
+evalBinary _ Equal _ _                          = Left "Equality mismatch"
+evalBinary _ NotEqual (LInteger i) (LInteger i')   = pure $ LBool (i /= i')
+evalBinary _ NotEqual (LString t) (LString t')     = pure $ LBool (t /= t')
+evalBinary _ NotEqual (LDate t) (LDate t')         = pure $ LBool (t /= t')
+evalBinary _ NotEqual (LBytes t) (LBytes t')       = pure $ LBool (t /= t')
+evalBinary _ NotEqual (LBool t) (LBool t')         = pure $ LBool (t /= t')
+evalBinary _ NotEqual (TermSet t) (TermSet t')     = pure $ LBool (t /= t')
+evalBinary _ NotEqual (TermArray t) (TermArray t') = pure $ LBool (t /= t')
+evalBinary _ NotEqual (TermMap t) (TermMap t')     = pure $ LBool (t /= t')
+evalBinary _ NotEqual _ _                          = Left "Inequity mismatch"
+evalBinary _ HeterogeneousEqual t t'             = pure $ LBool (t == t')
+evalBinary _ HeterogeneousNotEqual t t'          = pure $ LBool (t /= t')
 evalBinary _ LessThan (LInteger i) (LInteger i') = pure $ LBool (i < i')
 evalBinary _ LessThan (LDate t) (LDate t')       = pure $ LBool (t < t')
 evalBinary _ LessThan _ _                        = Left "< mismatch"
@@ -408,8 +478,10 @@ evalBinary _ GreaterOrEqual (LDate t) (LDate t')       = pure $ LBool (t >= t')
 evalBinary _ GreaterOrEqual _ _                        = Left ">= mismatch"
 -- string-related operations
 evalBinary _ Prefix (LString t) (LString t') = pure $ LBool (t' `Text.isPrefixOf` t)
-evalBinary _ Prefix _ _                      = Left "Only strings support `.starts_with()`"
+evalBinary _ Prefix (TermArray t) (TermArray t') = pure . LBool $ t' `List.isPrefixOf` t
+evalBinary _ Prefix _ _                      = Left "Only strings and arrays support `.starts_with()`"
 evalBinary _ Suffix (LString t) (LString t') = pure $ LBool (t' `Text.isSuffixOf` t)
+evalBinary _ Suffix (TermArray t) (TermArray t') = pure . LBool $ t' `List.isSuffixOf` t
 evalBinary _ Suffix _ _                      = Left "Only strings support `.ends_with()`"
 evalBinary Limits{allowRegexes} Regex  (LString t) (LString r) | allowRegexes = regexMatch t r
                                                                | otherwise    = Left "Regex evaluation is disabled"
@@ -437,17 +509,34 @@ evalBinary _ And (LBool b) (LBool b') = pure $ LBool (b && b')
 evalBinary _ And _ _ = Left "Only booleans support &&"
 evalBinary _ Or (LBool b) (LBool b') = pure $ LBool (b || b')
 evalBinary _ Or _ _ = Left "Only booleans support ||"
+evalBinary _ LazyAnd _ _ = Left "internal error: leftover &&"
+evalBinary _ LazyOr _ _ = Left "internal error: leftover ||"
 -- set operations
 evalBinary _ Contains (TermSet t) (TermSet t') = pure $ LBool (Set.isSubsetOf t' t)
 evalBinary _ Contains (TermSet t) t' = case valueToSetTerm t' of
     Just t'' -> pure $ LBool (Set.member t'' t)
     Nothing  -> Left "Sets cannot contain nested sets nor variables"
 evalBinary _ Contains (LString t) (LString t') = pure $ LBool (t' `isInfixOf` t)
+evalBinary _ Contains (TermArray t) t' = pure . LBool $ t' `elem` t
+evalBinary _ Contains (TermMap t) (LInteger i) = pure . LBool $ IntKey i `Map.member` t
+evalBinary _ Contains (TermMap t) (LString s) = pure . LBool $ StringKey s `Map.member` t
+evalBinary _ Contains (TermMap _) _ = pure $ LBool False
 evalBinary _ Contains _ _ = Left "Only sets and strings support `.contains()`"
 evalBinary _ Intersection (TermSet t) (TermSet t') = pure $ TermSet (Set.intersection t t')
 evalBinary _ Intersection _ _ = Left "Only sets support `.intersection()`"
 evalBinary _ Union (TermSet t) (TermSet t') = pure $ TermSet (Set.union t t')
 evalBinary _ Union _ _ = Left "Only sets support `.union()`"
+evalBinary _ Get (TermArray t) (LInteger i) = pure $
+  if i < List.genericLength t
+  then List.genericIndex t i
+  else LNull
+evalBinary _ Get (TermMap t) (LInteger i) = pure . fromMaybe LNull $ t !? IntKey i
+evalBinary _ Get (TermMap t) (LString s) = pure . fromMaybe LNull $ t !? StringKey s
+evalBinary _ Get _ _ = Left "Only arrays and maps support `.get()`"
+evalBinary _ Any _ _ = Left "internal error: leftover .any()"
+evalBinary _ All _ _ = Left "internal error: leftover .all()"
+evalBinary _ Try _ _ = Left "internal error: leftover .try_or()"
+evalBinary Limits{externFuncs} (BinaryFfi n) l r = runExternFunc externFuncs n l (Just r)
 
 checkedOp :: (Integer -> Integer -> Integer)
           -> Int64 -> Int64
@@ -466,6 +555,100 @@ regexMatch text regexT = do
   result <- Regex.execute regex text
   pure . LBool $ isJust result
 
+evaluateAll :: Limits
+            -> Bindings
+            -> Value
+            -> Expression
+            -> Either String Value
+evaluateAll l b xs' (EClosure [p] e) =
+  let runClosure v = do
+        if Map.member p b
+            then Left "Shadowed variable"
+            else Right ()
+        evaluateExpression l (Map.insert p v b) e >>= \case
+          LBool x -> Right x
+          _ -> Left "Expected boolean"
+      makeArray :: (MapKey, Value) -> Value
+      makeArray (k,v) = case k of
+        IntKey i    -> TermArray [LInteger i, v]
+        StringKey s -> TermArray [LString s, v]
+   in case xs' of
+    TermSet xs   -> LBool <$> allM (runClosure . setValueToValue) xs
+    TermArray xs -> LBool <$> allM runClosure xs
+    TermMap xs   -> LBool <$> allM (runClosure . makeArray) (Map.toList xs)
+    _            -> Left "Only sets, arrays and maps support .all()"
+evaluateAll _ _ _  _ = Left "Expected closure"
+
+evaluateAny :: Limits
+            -> Bindings
+            -> Value
+            -> Expression
+            -> Either String Value
+evaluateAny l b xs' (EClosure [p] e) =
+  let runClosure v = do
+        if Map.member p b
+            then Left "Shadowed variable"
+            else Right ()
+        evaluateExpression l (Map.insert p v b) e >>= \case
+          LBool x -> Right x
+          _ -> Left "Expected boolean"
+      makeArray :: (MapKey, Value) -> Value
+      makeArray (k,v) = case k of
+        IntKey i    -> TermArray [LInteger i, v]
+        StringKey s -> TermArray [LString s, v]
+   in case xs' of
+    TermSet xs   -> LBool <$> anyM (runClosure . setValueToValue) xs
+    TermArray xs -> LBool <$> anyM runClosure xs
+    TermMap xs   -> LBool <$> anyM (runClosure . makeArray) (Map.toList xs)
+    _            -> Left "Only sets, arrays and maps support .any()"
+evaluateAny _ _ _  _ = Left "Expected closure"
+
+evaluateLazyAnd :: Limits
+                -> Bindings
+                -> Value
+                -> Expression
+                -> Either String Value
+evaluateLazyAnd l b lhs' (EClosure [] e) =
+  let runClosure =
+        evaluateExpression l b e >>= \case
+          LBool x -> Right x
+          _ -> Left "Expected boolean"
+   in case lhs' of
+        LBool lhs -> if lhs
+                     then LBool <$> runClosure
+                     else Right $ LBool False
+        _ -> Left "Expected boolean"
+evaluateLazyAnd _ _ _  _ = Left "Expected closure"
+
+evaluateLazyOr :: Limits
+                -> Bindings
+                -> Value
+                -> Expression
+                -> Either String Value
+evaluateLazyOr l b lhs' (EClosure [] e) =
+  let runClosure =
+        evaluateExpression l b e >>= \case
+          LBool x -> Right x
+          _ -> Left "Expected boolean"
+   in case lhs' of
+        LBool lhs -> if lhs
+                     then Right $ LBool True
+                     else LBool <$> runClosure
+        _ -> Left "Expected boolean"
+evaluateLazyOr _ _ _  _ = Left "Expected closure"
+
+evaluateTry :: Limits
+            -> Bindings
+            -> Expression
+            -> Expression
+            -> Either String Value
+evaluateTry l b (EClosure [] e) e' = do
+  rhs <- evaluateExpression l b e'
+  case evaluateExpression l b e of
+    Right r -> Right r
+    Left _  -> Right rhs
+evaluateTry _ _ _ _                = Left "Expected closure"
+
 -- | Given bindings for variables, reduce an expression to a single
 -- datalog value
 evaluateExpression :: Limits
@@ -474,6 +657,19 @@ evaluateExpression :: Limits
                    -> Either String Value
 evaluateExpression l b = \case
     EValue term -> applyVariable b term
-    EUnary op e' -> evalUnary op =<< evaluateExpression l b e'
-    EBinary op e' e'' -> uncurry (evalBinary l op) =<< join bitraverse (evaluateExpression l b) (e', e'')
-
+    EUnary op e -> evalUnary l op =<< evaluateExpression l b e
+    EBinary LazyAnd e e' -> do
+        lhs <- evaluateExpression l b e
+        evaluateLazyAnd l b lhs e'
+    EBinary LazyOr e e' -> do
+        lhs <- evaluateExpression l b e
+        evaluateLazyOr l b lhs e'
+    EBinary Any e e' -> do
+        lhs <- evaluateExpression l b e
+        evaluateAny l b lhs e'
+    EBinary All e e' -> do
+        lhs <- evaluateExpression l b e
+        evaluateAll l b lhs e'
+    EBinary Try e e' -> evaluateTry l b e e'
+    EBinary op e e' -> uncurry (evalBinary l op) =<< join bitraverse (evaluateExpression l b) (e, e')
+    EClosure _ _ -> Left "Unexpected closure"

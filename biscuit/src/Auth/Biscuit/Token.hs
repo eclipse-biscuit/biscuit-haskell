@@ -536,7 +536,7 @@ parseBiscuitWith :: Applicative m
 parseBiscuitWith ParserConfig{..} bs =
   let input = case encoding of
         RawBytes  -> Right bs
-        UrlBase64 -> first (const InvalidB64Encoding) . B64.decodeBase64 $ bs
+        UrlBase64 -> first (const InvalidB64Encoding) . B64.decodeBase64Untyped $ bs
       parsedWrapper = parseBiscuitWrapper =<< input
       wrapperToBiscuit w@BiscuitWrapper{wRootKeyId} =
         let pk = getPublicKey wRootKeyId

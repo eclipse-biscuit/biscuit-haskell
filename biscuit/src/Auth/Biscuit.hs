@@ -108,6 +108,7 @@ import           Control.Monad                       ((<=<))
 import           Control.Monad.Identity              (runIdentity)
 import           Data.Bifunctor                      (first)
 import           Data.ByteString                     (ByteString)
+import qualified Data.ByteString.Base64.Types        as B64
 import qualified Data.ByteString.Base64.URL          as B64
 import           Data.Foldable                       (toList)
 import           Data.Set                            (Set)
@@ -351,28 +352,28 @@ serialize = serializeBiscuit
 
 -- | Serialize a biscuit to URL-compatible base 64, as recommended by the spec
 serializeB64 :: BiscuitProof p => Biscuit p Verified -> ByteString
-serializeB64 = B64.encodeBase64' . serialize
+serializeB64 = B64.extractBase64 . B64.encodeBase64' . serialize
 
 -- | Generate a base64-encoded third-party block request. It can be used in
 -- conjunction with 'mkThirdPartyBlockB64' to generate a base64-encoded
 -- third-party block, which can be then appended to a token with
 -- 'applyThirdPartyBlockB64'.
 mkThirdPartyBlockReqB64 :: Biscuit Open c -> ByteString
-mkThirdPartyBlockReqB64 = B64.encodeBase64' . mkThirdPartyBlockReq
+mkThirdPartyBlockReqB64 = B64.extractBase64 . B64.encodeBase64' . mkThirdPartyBlockReq
 
 -- | Given a base64-encoded third-party block request, generate a base64-encoded
 -- third-party block, which can be then appended to a token with
 -- 'applyThirdPartyBlockB64'.
 mkThirdPartyBlockB64 :: SecretKey -> ByteString -> Block -> Either String ByteString
 mkThirdPartyBlockB64 sk reqB64 b = do
-  req <- first unpack $ B64.decodeBase64 reqB64
+  req <- first unpack $ B64.decodeBase64Untyped reqB64
   contents <- mkThirdPartyBlock sk req b
-  pure $ B64.encodeBase64' contents
+  pure $ B64.extractBase64 $ B64.encodeBase64' contents
 
 -- | Given a base64-encoded third-party block, append it to a token.
 applyThirdPartyBlockB64 :: Biscuit Open check -> ByteString -> Either String (IO (Biscuit Open check))
 applyThirdPartyBlockB64 b contentsB64 = do
-  contents <- first unpack $ B64.decodeBase64 contentsB64
+  contents <- first unpack $ B64.decodeBase64Untyped contentsB64
   applyThirdPartyBlock b contents
 
 -- $biscuitBlocks

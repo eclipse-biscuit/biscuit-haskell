@@ -2,6 +2,18 @@
 {-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE NamedFieldPuns        #-}
 {-# LANGUAGE OverloadedStrings     #-}
+{-|
+  Module      : Network.Wai.Middleware.Biscuit
+  Copyright   : © Clément Delafargue, 2025
+  License     : BSD-3-Clause
+  Maintainer  : clement@delafargue.name
+  WAI support for biscuit tokens
+
+  This module provides WAI middlewares as well as builder functions for WAI middlewares, that allow protecting an HTTP application with biscuit tokens.
+
+  The middlewares use the request vault to store either a verified biscuit token (see 'parseBiscuit', 'parseOptionalBiscuit', and 'parseBiscuitWith'),
+  letting the application perform authorization, or the result of the authorization for cases where authorization is the same for all requests and can be performed directly in the middleware (see 'authorizeBiscuit'' and 'authorizeBiscuitWith')
+-}
 module Network.Wai.Middleware.Biscuit
   (
   -- * Biscuit parsing
@@ -40,7 +52,7 @@ import           Network.Wai        (Middleware, Request (..), Response,
                                      responseLBS)
 
 -- | Key where the verified biscuit is stored in the request context. The
--- 'Vault' module is designed to make keys opaque and unique, hence the use of
+-- 'Data.Vault.Lazy' module is designed to make keys opaque and unique, hence the use of
 -- 'IO' for key generation. Here we don’t care about unicity, we want the token
 -- to be easily accessible. Hence the call to 'unsafePerformIO'.
 {-# NOINLINE  biscuitKey #-}
@@ -48,7 +60,7 @@ biscuitKey :: Vault.Key (Biscuit OpenOrSealed Verified)
 biscuitKey = unsafePerformIO Vault.newKey
 
 -- | Key where the authorized biscuit is stored in the request context. The
--- 'Vault' module is designed to make keys opaque and unique, hence the use of
+-- 'Data.Vault.Lazy' module is designed to make keys opaque and unique, hence the use of
 -- 'IO' for key generation. Here we don’t care about unicity, we want the token
 -- to be easily accessible. Hence the call to 'unsafePerformIO'.
 {-# NOINLINE  authorizedBiscuitKey #-}
@@ -59,12 +71,16 @@ authorizedBiscuitKey = unsafePerformIO Vault.newKey
 -- in conjunction with the 'parseBiscuit' (or 'parseBiscuitWith') middleware.
 -- It will not be set by the 'authorizeBiscuit'' (or 'authorizeBiscuitWith')
 -- middleware.
+--
+-- @since 0.1.0.0
 getBiscuit :: Request -> Maybe (Biscuit OpenOrSealed Verified)
 getBiscuit = Vault.lookup biscuitKey . vault
 
 -- | Retrieve the result of the successful authorization from the request
 -- context. It is meant to be used in conjunction with the 'authorizeBiscuit''
 -- (or the 'authorizeBiscuitWith') middleware.
+--
+-- @since 0.1.0.0
 getAuthorizedBiscuit :: Request -> Maybe (AuthorizedBiscuit OpenOrSealed)
 getAuthorizedBiscuit = Vault.lookup authorizedBiscuitKey . vault
 
@@ -84,6 +100,8 @@ getAuthorizedBiscuit = Vault.lookup authorizedBiscuitKey . vault
 --
 -- If you need custom extraction, parsing or error handling, have a look at
 -- 'parseBiscuitWith'.
+--
+-- @since 0.1.0.0
 parseBiscuit :: PublicKey -> Middleware
 parseBiscuit = parseBiscuitWith . defaultExtractionConfig
 
@@ -105,6 +123,8 @@ parseBiscuit = parseBiscuitWith . defaultExtractionConfig
 --
 -- If you need custom extraction, parsing or error handling, have a look at
 -- 'parseBiscuitWith'.
+--
+-- @since 0.1.0.0
 parseOptionalBiscuit :: PublicKey -> Middleware
 parseOptionalBiscuit = parseBiscuitWith . defaultOptionalExtractionConfig
 
@@ -120,6 +140,8 @@ parseOptionalBiscuit = parseBiscuitWith . defaultOptionalExtractionConfig
 --
 -- If you don’t need custom extraction, parsing or error handling logic, have a
 -- look at 'parseBiscuit'.
+--
+-- @since 0.1.0.0
 parseBiscuitWith :: ExtractionConfig e -> Middleware
 parseBiscuitWith config app req sendResponse = do
   let ExtractionConfig{extractToken,parseToken,handleError, onMissingBiscuit} = config
@@ -151,6 +173,8 @@ parseBiscuitWith config app req sendResponse = do
 --
 -- If you need custom extraction, parsing, authorization or error handling,
 -- have a look at 'authorizeBiscuitWith'.
+--
+-- @since 0.1.0.0
 authorizeBiscuit' :: PublicKey -> (Request -> IO Authorizer) -> Middleware
 authorizeBiscuit' publicKey = authorizeBiscuitWith . defaultAuthorizationConfig publicKey
 
@@ -166,6 +190,8 @@ authorizeBiscuit' publicKey = authorizeBiscuitWith . defaultAuthorizationConfig 
 --
 -- If you don’t need custom extraction, parsing, authorization, or error
 -- handling logic, have a look at 'authorizeBiscuit''.
+--
+-- @since 0.1.0.0
 authorizeBiscuitWith :: AuthorizationConfig e -> Middleware
 authorizeBiscuitWith config app req sendResponse = do
   let AuthorizationConfig{extractToken,parseToken,authorizeToken,handleError} = config
@@ -178,6 +204,8 @@ authorizeBiscuitWith config app req sendResponse = do
   either onError forward eResult
 
 -- | Configuration for 'parseBiscuitWith'.
+--
+-- @since 0.1.0.0
 data ExtractionConfig e
   = ExtractionConfig
   -- | How to extract a token from a request
@@ -191,6 +219,8 @@ data ExtractionConfig e
   }
 
 -- | Configuration for 'authorizeBiscuitWith'.
+--
+-- @since 0.1.0.0
 data AuthorizationConfig e
   = AuthorizationConfig
   -- | How to extract a token from a request
@@ -204,6 +234,8 @@ data AuthorizationConfig e
   }
 
 -- | Errors that can happen during token authorization
+--
+-- @since 0.1.0.0
 data BiscuitError
   -- | No token was provided
   = NoToken
@@ -220,6 +252,8 @@ data BiscuitError
 -- - Errors are logged to stdout;
 -- - Missing tokens are rejected with a bodyless 401 HTTP response;
 -- - Parsing errors are rejected with a bodyless 403 HTTP response.
+--
+-- @since 0.1.0.0
 defaultExtractionConfig :: PublicKey -> ExtractionConfig BiscuitError
 defaultExtractionConfig publicKey = ExtractionConfig
   { extractToken = pure . Right . defaultExtractToken
@@ -236,6 +270,8 @@ defaultExtractionConfig publicKey = ExtractionConfig
 -- - Errors are logged to stdout;
 -- - Missing tokens are not rejected;
 -- - Parsing errors are rejected with a bodyless 403 HTTP response.
+--
+-- @since 0.1.0.0
 defaultOptionalExtractionConfig :: PublicKey -> ExtractionConfig BiscuitError
 defaultOptionalExtractionConfig publicKey = ExtractionConfig
   { extractToken = pure . Right . defaultExtractToken
@@ -254,6 +290,8 @@ defaultOptionalExtractionConfig publicKey = ExtractionConfig
 -- - Missing tokens are rejected with a bodyless 401 HTTP response;
 -- - Parsing errors are rejected with a bodyless 403 HTTP response.
 -- - Authorization errors are rejected with a bodyless 403 HTTP response.
+--
+-- @since 0.1.0.0
 defaultAuthorizationConfig :: PublicKey -> (Request -> IO Authorizer) -> AuthorizationConfig BiscuitError
 defaultAuthorizationConfig publicKey mkAuthorizer = AuthorizationConfig
   { extractToken = pure . maybe (Left NoToken) Right . defaultExtractToken
@@ -264,6 +302,8 @@ defaultAuthorizationConfig publicKey mkAuthorizer = AuthorizationConfig
 
 -- | Extract a token from the @Authorization@ header, stripping the @Bearer @
 -- prefix.
+--
+-- @since 0.1.0.0
 defaultExtractToken :: Request -> Maybe ByteString
 defaultExtractToken req = do
   (_, authHeader) <- List.find ((== hAuthorization) . fst) $ requestHeaders req
@@ -275,6 +315,8 @@ defaultExtractToken req = do
 -- - Missing tokens result in a 401 bodyless response;
 -- - Parsing errors result in a 403 bodyless response;
 -- - Authorization errors result in a 403 bodyless response.
+--
+-- @since 0.1.0.0
 defaultHandleError :: BiscuitError -> IO Response
 defaultHandleError = \case
   NoToken      -> do

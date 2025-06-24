@@ -13,7 +13,7 @@ copyright:      2021 Clément Delafargue
 license:        BSD3
 license-file:   LICENSE
 build-type:     Simple
-tested-with:    GHC ==9.0.2 || ==9.2.4 || ==9.6.5 || ==9.8.2
+tested-with:    GHC ==9.6.7 || ==9.8.4 || ==9.10.2 || ==9.12.2
 extra-source-files:
     README.md
     ChangeLog.md

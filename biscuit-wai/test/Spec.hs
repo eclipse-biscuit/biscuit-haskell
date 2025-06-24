@@ -20,7 +20,8 @@ import           Network.Wai                    (Application,
 import qualified Network.Wai.Handler.Warp       as Warp
 import           Network.Wai.Middleware.Biscuit (authorizeBiscuit',
                                                  getAuthorizedBiscuit,
-                                                 getBiscuit, parseBiscuit)
+                                                 getBiscuit, parseBiscuit,
+                                                 parseOptionalBiscuit)
 import           Test.Hspec                     (around, describe, hspec, it,
                                                  shouldBe)
 
@@ -33,6 +34,10 @@ otherSecretKey = fromMaybe (error "Failed parsing secret key") $ parseSecretKeyH
 app :: Application
 app =
   let endpoint req sendResponse = case pathInfo req of
+        ["protected", "optional"] ->
+          case getBiscuit req of
+            Just _  -> sendResponse $ responseLBS ok200 mempty mempty
+            Nothing -> sendResponse $ responseLBS ok200 mempty mempty
         ["protected", "parsed"] ->
           case getBiscuit req of
             Just _  -> sendResponse $ responseLBS ok200 mempty mempty
@@ -43,14 +48,17 @@ app =
             Nothing -> sendResponse $ responseLBS badRequest400 mempty mempty
         [] -> sendResponse $ responseLBS ok200 mempty mempty
         _ -> sendResponse $ responseLBS notFound404 mempty mempty
-      checkBiscuit = parseBiscuit (toPublic secretKey)
-      checkBiscuit' = authorizeBiscuit' (toPublic secretKey) $ \req ->
+      checkBiscuit = parseOptionalBiscuit (toPublic secretKey)
+      checkBiscuit' = parseBiscuit (toPublic secretKey)
+      checkBiscuit'' = authorizeBiscuit' (toPublic secretKey) $ \req ->
         let path = decodeUtf8 $ rawPathInfo req
          in pure [authorizer|allow if right({path});|]
+      isProtectedOptional = (== ["protected", "optional"]) . take 2 . pathInfo
       isProtectedParsed = (== ["protected", "parsed"]) . take 2 . pathInfo
       isProtectedAuthed = (== ["protected", "authed"]) . take 2 . pathInfo
-   in ifRequest isProtectedParsed checkBiscuit $
-        ifRequest isProtectedAuthed checkBiscuit' endpoint
+   in ifRequest isProtectedOptional checkBiscuit $
+        ifRequest isProtectedParsed checkBiscuit' $
+          ifRequest isProtectedAuthed checkBiscuit'' endpoint
 
 withApp :: (Warp.Port -> IO ()) -> IO ()
 withApp =
@@ -69,6 +77,28 @@ main = do
           it "accepts unauthenticated calls" $ \port -> do
             req <- parseRequest $ "http://localhost:" <> show port
             res <- httpLbs req manager
+            statusCode (responseStatus res) `shouldBe` 200
+        describe "on protected endpoints (optional)" $ do
+          it "accepts unauthenticated calls" $ \port -> do
+            req <- parseRequest $ "http://localhost:" <> show port
+            res <- httpLbs req manager
+            statusCode (responseStatus res) `shouldBe` 200
+          it "rejects gibberish tokens" $ \port -> do
+            req <- parseRequest $ "http://localhost:" <> show port <> "/protected/parsed"
+            let withAuth = applyBearerAuth "whatevs" req
+            res <- httpLbs withAuth manager
+            statusCode (responseStatus res) `shouldBe` 403
+          it "rejects tokens signed by the wrong keypair" $ \port -> do
+            badToken <- mkBiscuit otherSecretKey mempty
+            req <- parseRequest $ "http://localhost:" <> show port <> "/protected/parsed"
+            let withAuth = applyBearerAuth (serializeB64 badToken) req
+            res <- httpLbs withAuth manager
+            statusCode (responseStatus res) `shouldBe` 403
+          it "accepts properly signed tokens" $ \port -> do
+            goodToken <- mkBiscuit secretKey mempty
+            req <- parseRequest $ "http://localhost:" <> show port <> "/protected/parsed"
+            let withAuth = applyBearerAuth (serializeB64 goodToken) req
+            res <- httpLbs withAuth manager
             statusCode (responseStatus res) `shouldBe` 200
         describe "on protected endpoints (parsing)" $ do
           it "rejects unauthenticated calls" $ \port -> do

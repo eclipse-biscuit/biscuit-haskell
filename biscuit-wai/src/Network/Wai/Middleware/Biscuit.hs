@@ -6,10 +6,12 @@ module Network.Wai.Middleware.Biscuit
   (
   -- * Biscuit parsing
     parseBiscuit
+  , parseOptionalBiscuit
   , getBiscuit
   , parseBiscuitWith
   , ExtractionConfig (..)
   , defaultExtractionConfig
+  , defaultOptionalExtractionConfig
   -- * Biscuit authorization
   , authorizeBiscuit'
   , getAuthorizedBiscuit
@@ -85,6 +87,27 @@ getAuthorizedBiscuit = Vault.lookup authorizedBiscuitKey . vault
 parseBiscuit :: PublicKey -> Middleware
 parseBiscuit = parseBiscuitWith . defaultExtractionConfig
 
+-- | Given a public key, generate a middleware that will extract a biscuit
+-- token from incoming requests, parse it, and verify its signature.
+--
+-- Requests without a verified biscuit are __not__ rejected.
+-- The verified biscuit is added to the request context (if available).
+-- Requests with a token that fails parsing or verification are rejected.
+-- __The token is not authorized, only parsed and has its signature verified__.
+-- Authorization is meant to be carried out in the application itself. If you
+-- want to carry out authorization in the middleware, have a look at
+-- 'authorizeBiscuit'' (or 'authorizeBiscuitWith').
+--
+-- The token is expected as a base64-encoded string, provided as a bearer token
+-- in the @Authorization@ header. A missing header results in a bodyless 401
+-- HTTP response. An invalid token results in a bodyless 403 HTTP response.
+-- Errors are logged to stdout.
+--
+-- If you need custom extraction, parsing or error handling, have a look at
+-- 'parseBiscuitWith'.
+parseOptionalBiscuit :: PublicKey -> Middleware
+parseOptionalBiscuit = parseBiscuitWith . defaultOptionalExtractionConfig
+
 -- | Given a way to extract a token from a request, parse it, and handle errors,
 -- generate a middleware that will extract a biscuit token from incoming
 -- requests, parse it, and verify its signature. Requests without a verified
@@ -99,13 +122,16 @@ parseBiscuit = parseBiscuitWith . defaultExtractionConfig
 -- look at 'parseBiscuit'.
 parseBiscuitWith :: ExtractionConfig e -> Middleware
 parseBiscuitWith config app req sendResponse = do
-  let ExtractionConfig{extractToken,parseToken,handleError} = config
+  let ExtractionConfig{extractToken,parseToken,handleError, onMissingBiscuit} = config
+      noBiscuit = pure $ Nothing <$ onMissingBiscuit
+      parse = fmap (fmap Just) . parseToken
       onError = sendResponse <=< handleError
       forward t = do
-         let newVault = Vault.insert biscuitKey t (vault req)
+         let oldVault = vault req
+             newVault = maybe id (Vault.insert biscuitKey) t $ oldVault
          app req { vault = newVault } sendResponse
-  eBiscuit <- either (pure . Left) parseToken =<< extractToken req
-  either onError forward eBiscuit
+  emBiscuit <- either (pure . Left) (maybe noBiscuit parse) =<< extractToken req
+  either onError forward emBiscuit
 
 -- | Given a public key and a way to generate an authorizer from a request,
 -- generate a middleware that will extract a biscuit token from incoming
@@ -155,11 +181,13 @@ authorizeBiscuitWith config app req sendResponse = do
 data ExtractionConfig e
   = ExtractionConfig
   -- | How to extract a token from a request
-  { extractToken :: Request -> IO (Either e ByteString)
+  { extractToken :: Request -> IO (Either e (Maybe ByteString))
   -- | How to parse a token from the extracted serialized bytestring
   , parseToken   :: ByteString -> IO (Either e (Biscuit OpenOrSealed Verified))
   -- | How to handle errors (this does not allow recovery)
   , handleError  :: e -> IO Response
+  -- | How to handle requests with no biscuits
+  , onMissingBiscuit :: Either e ()
   }
 
 -- | Configuration for 'authorizeBiscuitWith'.
@@ -194,9 +222,26 @@ data BiscuitError
 -- - Parsing errors are rejected with a bodyless 403 HTTP response.
 defaultExtractionConfig :: PublicKey -> ExtractionConfig BiscuitError
 defaultExtractionConfig publicKey = ExtractionConfig
-  { extractToken = pure . maybe (Left NoToken) Right . defaultExtractToken
+  { extractToken = pure . Right . defaultExtractToken
   , parseToken = pure . Data.Bifunctor.first ParseError . parseB64 publicKey
   , handleError = defaultHandleError
+  , onMissingBiscuit = Left NoToken
+  }
+
+-- | Default behaviour for optional token extraction and parsing.
+--
+-- - Extract the token as a bearer token from the @Authorization@ header;
+-- - Parse the token as URL-safe base64 strings, using the provided public
+--   key;
+-- - Errors are logged to stdout;
+-- - Missing tokens are not rejected;
+-- - Parsing errors are rejected with a bodyless 403 HTTP response.
+defaultOptionalExtractionConfig :: PublicKey -> ExtractionConfig BiscuitError
+defaultOptionalExtractionConfig publicKey = ExtractionConfig
+  { extractToken = pure . Right . defaultExtractToken
+  , parseToken = pure . Data.Bifunctor.first ParseError . parseB64 publicKey
+  , handleError = defaultHandleError
+  , onMissingBiscuit = Right ()
   }
 
 -- | Default behaviour for token extraction, parsing and authorization.

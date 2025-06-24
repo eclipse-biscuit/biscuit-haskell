@@ -75,12 +75,13 @@ import           Auth.Biscuit.Crypto                 (PublicKey, SecretKey,
                                                       Signature, SignedBlock,
                                                       getSignatureProof,
                                                       sigBytes,
-                                                      sign3rdPartyBlock,
-                                                      signBlock,
+                                                      sign3rdPartyBlockV1,
+                                                      signAttenuationBlock,
+                                                      signAuthority,
                                                       signExternalBlock,
                                                       skBytes, toPublic,
                                                       verifyBlocks,
-                                                      verifyExternalSig,
+                                                      verifyExternalSigV1,
                                                       verifySecretProof,
                                                       verifySignatureProof)
 import           Auth.Biscuit.Datalog.AST            (Authorizer, Block, Query,
@@ -107,7 +108,7 @@ import           Auth.Biscuit.Symbols
 -- so we need to keep the initial serialized payload around in order to compute
 -- a new signature when adding a block.
 type ExistingBlock = (ByteString, Block)
-type ParsedSignedBlock = (ExistingBlock, Signature, PublicKey, Maybe (Signature, PublicKey))
+type ParsedSignedBlock = (ExistingBlock, Signature, PublicKey, Maybe (Signature, PublicKey), Maybe Int)
 
 -- $openOrSealed
 --
@@ -218,7 +219,7 @@ queryRawBiscuitFactsWithLimits :: Biscuit openOrSealed check -> Limits -> Query
                                -> Either String (Set Bindings)
 queryRawBiscuitFactsWithLimits b@Biscuit{authority,blocks} =
   let ePks = externalKeys b
-      getBlock ((_, block), _, _, _) = block
+      getBlock ((_, block), _, _, _, _) = block
       allBlocks = zip [0..] $ getBlock <$> authority : blocks
       (_, sFacts) = foldMap (uncurry collectWorld . fmap (toEvaluation ePks)) allBlocks
    in queryAvailableFacts ePks sFacts
@@ -263,7 +264,7 @@ asOpen b@Biscuit{proof}   = case proof of
   _           -> Nothing
 
 toParsedSignedBlock :: Block -> SignedBlock -> ParsedSignedBlock
-toParsedSignedBlock block (serializedBlock, sig, pk, eSig) = ((serializedBlock, block), sig, pk, eSig)
+toParsedSignedBlock block (serializedBlock, sig, pk, eSig, sigVersion) = ((serializedBlock, block), sig, pk, eSig, sigVersion)
 
 -- | Create a new biscuit with the provided authority block. Such a biscuit is 'Open' to
 -- further attenuation.
@@ -274,8 +275,8 @@ mkBiscuit = mkBiscuitWith Nothing
 -- further attenuation.
 mkBiscuitWith :: Maybe Int -> SecretKey -> Block -> IO (Biscuit Open Verified)
 mkBiscuitWith rootKeyId sk authority = do
-  let (authoritySymbols, authoritySerialized) = PB.encodeBlock <$> blockToPb False newSymbolTable authority
-  (signedBlock, nextSk) <- signBlock sk authoritySerialized Nothing
+  let ((authoritySymbols, authorityVersion), authoritySerialized) = PB.encodeBlock <$> blockToPb False newSymbolTable authority
+  (signedBlock, nextSk) <- signAuthority sk (authoritySerialized, authorityVersion)
   pure Biscuit { rootKeyId
                , authority = toParsedSignedBlock authority signedBlock
                , blocks = []
@@ -290,9 +291,10 @@ addBlock :: Block
          -> Biscuit Open check
          -> IO (Biscuit Open check)
 addBlock block b@Biscuit{..} = do
-  let (blockSymbols, blockSerialized) = PB.encodeBlock <$> blockToPb False symbols block
-      Open p = proof
-  (signedBlock, nextSk) <- signBlock p blockSerialized Nothing
+  let ((blockSymbols, version), blockSerialized) = PB.encodeBlock <$> blockToPb False symbols block
+      Open sk = proof
+      (_, prevSig, _, _,_) = NE.last $ authority :| blocks
+  (signedBlock, nextSk) <- signAttenuationBlock sk prevSig (blockSerialized, version) Nothing
   pure $ b { blocks = blocks <> [toParsedSignedBlock block signedBlock]
            , symbols = addFromBlock symbols blockSymbols
            , proof = Open nextSk
@@ -306,22 +308,22 @@ addSignedBlock :: SecretKey
                -> Biscuit Open check
                -> IO (Biscuit Open check)
 addSignedBlock eSk block b@Biscuit{..} = do
-  let (_, blockSerialized) = PB.encodeBlock <$> blockToPb True newSymbolTable block
+  let ((_, version), blockSerialized) = PB.encodeBlock <$> blockToPb True newSymbolTable block
       lastBlock = NE.last (authority :| blocks)
-      (_, _, lastPublicKey, _) = lastBlock
-      Open p = proof
-  (signedBlock, nextSk) <- signExternalBlock p eSk lastPublicKey blockSerialized
+      (_, prevSig, _, _, _) = lastBlock
+      Open sk = proof
+  (signedBlock, nextSk) <- signExternalBlock sk prevSig (blockSerialized, version) eSk
   pure $ b { blocks = blocks <> [toParsedSignedBlock block signedBlock]
            , proof = Open nextSk
            }
 
 mkThirdPartyBlock' :: SecretKey
-                   -> PublicKey
+                   -> Signature
                    -> Block
                    -> (ByteString, Signature, PublicKey)
-mkThirdPartyBlock' eSk lastPublicKey block =
+mkThirdPartyBlock' eSk prevSig block =
   let (_, payload) = PB.encodeBlock <$> blockToPb True newSymbolTable block
-      (eSig, ePk) = sign3rdPartyBlock eSk lastPublicKey payload
+      (eSig, ePk) = sign3rdPartyBlockV1 eSk prevSig payload
    in (payload, eSig, ePk)
 
 -- | Given a third-party block request, generate a third-party block,
@@ -331,8 +333,8 @@ mkThirdPartyBlock :: SecretKey
                   -> Block
                   -> Either String ByteString
 mkThirdPartyBlock eSk req block = do
-  previousPk<- pbToThirdPartyBlockRequest =<< PB.decodeThirdPartyBlockRequest req
-  pure $ PB.encodeThirdPartyBlockContents . thirdPartyBlockContentsToPb $ mkThirdPartyBlock' eSk previousPk block
+  prevSig <- pbToThirdPartyBlockRequest =<< PB.decodeThirdPartyBlockRequest req
+  pure $ PB.encodeThirdPartyBlockContents . thirdPartyBlockContentsToPb $ mkThirdPartyBlock' eSk prevSig block
 
 -- | Generate a third-party block request. It can be used in
 -- conjunction with 'mkThirdPartyBlock' to generate a
@@ -340,22 +342,22 @@ mkThirdPartyBlock eSk req block = do
 -- 'applyThirdPartyBlock'.
 mkThirdPartyBlockReq :: Biscuit proof check -> ByteString
 mkThirdPartyBlockReq Biscuit{authority,blocks} =
-  let (_, _ , lastPk, _) = NE.last $ authority :| blocks
-   in PB.encodeThirdPartyBlockRequest $ thirdPartyBlockRequestToPb lastPk
+  let (_, prevSig , _, _, _) = NE.last $ authority :| blocks
+   in PB.encodeThirdPartyBlockRequest $ thirdPartyBlockRequestToPb prevSig
 
 -- | Given a base64-encoded third-party block, append it to a token.
 applyThirdPartyBlock :: Biscuit Open check -> ByteString -> Either String (IO (Biscuit Open check))
 applyThirdPartyBlock b@Biscuit{..} contents = do
   (payload, eSig, ePk) <- pbToThirdPartyBlockContents =<< PB.decodeThirdPartyBlockContents contents
-  let Open p = proof
-      addESig (a,b',c,_) = (a,b',c, Just (eSig, ePk))
-      (_, _, lastPk, _) = NE.last $ authority :| blocks
+  let Open sk = proof
+      addESig (a,b',c,_, d) = (a,b',c, Just (eSig, ePk), d)
+      (_, prevSig, _, _, _) = NE.last $ authority :| blocks
   pbBlock <- PB.decodeBlock payload
   (block, newSymbols) <- (`runStateT` symbols) $ pbToBlock (Just ePk) pbBlock
-  unless (verifyExternalSig lastPk (payload, eSig, ePk)) $
+  unless (verifyExternalSigV1 prevSig (payload, eSig, ePk)) $
     Left "Invalid 3rd party signature"
   pure $ do
-    (signedBlock, nextSk) <- signBlock p payload (Just (eSig, ePk))
+    (signedBlock, nextSk) <- signAttenuationBlock sk prevSig (payload, 3) (Just (eSig, ePk))
     pure $ b { blocks = blocks <> [toParsedSignedBlock block (addESig signedBlock)]
              , proof = Open nextSk
              , symbols = newSymbols
@@ -363,8 +365,8 @@ applyThirdPartyBlock b@Biscuit{..} contents = do
 
 externalKeys :: Biscuit openOrSealed check -> [Maybe PublicKey]
 externalKeys Biscuit{blocks} =
-  let getEpk (_, _, _, Just (_, ePk)) = Just ePk
-      getEpk _                        = Nothing
+  let getEpk (_, _, _, Just (_, ePk), _) = Just ePk
+      getEpk _                           = Nothing
    in Nothing : (getEpk <$> blocks)
 
 -- | Turn an 'Open' biscuit into a 'Sealed' one, preventing it from being attenuated
@@ -372,8 +374,8 @@ externalKeys Biscuit{blocks} =
 seal :: Biscuit Open check -> Biscuit Sealed check
 seal b@Biscuit{..} =
   let Open sk = proof
-      ((lastPayload, _), lastSig, lastPk, eSig) = NE.last $ authority :| blocks
-      newProof = Sealed $ getSignatureProof (lastPayload, lastSig, lastPk, eSig) sk
+      ((lastPayload, _), lastSig, lastPk, eSig, _) = NE.last $ authority :| blocks
+      newProof = Sealed $ getSignatureProof (lastPayload, lastSig, lastPk, eSig, Nothing) sk
    in b { proof = newProof }
 
 -- | Serialize a biscuit to a raw bytestring
@@ -390,7 +392,7 @@ serializeBiscuit Biscuit{..} =
         }
 
 toPBSignedBlock :: ParsedSignedBlock -> PB.SignedBlock
-toPBSignedBlock ((block, _), sig, pk, eSig) = signedBlockToPb (block, sig, pk, eSig)
+toPBSignedBlock ((block, _), sig, pk, eSig, sigVersion) = signedBlockToPb (block, sig, pk, eSig, sigVersion)
 
 -- | Errors that can happen when parsing a biscuit. Since complete parsing of a biscuit
 -- requires a signature check, an invalid signature check is a parsing error
@@ -444,7 +446,7 @@ checkRevocation :: Applicative m
                 -> BiscuitWrapper
                 -> m (Either ParseError BiscuitWrapper)
 checkRevocation isRevoked bw@BiscuitWrapper{wAuthority,wBlocks} =
-  let getRevocationId (_, sig, _, _) = sigBytes sig
+  let getRevocationId (_, sig, _, _, _) = sigBytes sig
       revocationIds = getRevocationId <$> wAuthority :| wBlocks
       keepIfNotRevoked True  = Left RevokedBiscuit
       keepIfNotRevoked False = Right bw
@@ -452,10 +454,10 @@ checkRevocation isRevoked bw@BiscuitWrapper{wAuthority,wBlocks} =
 
 parseBlocks :: BiscuitWrapper -> Either ParseError (Symbols, NonEmpty ParsedSignedBlock)
 parseBlocks BiscuitWrapper{..} = do
-  let parseBlock (payload, sig, pk, eSig) = do
+  let parseBlock (payload, sig, pk, eSig, sigVersion) = do
         pbBlock <- lift $ first (InvalidProtobufSer False) $ PB.decodeBlock payload
         block   <- mapStateT (first (InvalidProtobuf False)) $ pbToBlock (snd <$> eSig) pbBlock
-        pure ((payload, block), sig, pk, eSig)
+        pure ((payload, block), sig, pk, eSig,sigVersion)
 
   (allBlocks, symbols) <- (`runStateT` newSymbolTable) $ do
      traverse parseBlock (wAuthority :| wBlocks)
@@ -502,7 +504,7 @@ checkBiscuitSignatures :: BiscuitProof proof
                        -> Either ParseError (Biscuit proof Verified)
 checkBiscuitSignatures getPublicKey b@Biscuit{..} = do
   let pk = getPublicKey rootKeyId
-      toSignedBlock ((payload, _), sig, nextPk, eSig) = (payload, sig, nextPk, eSig)
+      toSignedBlock ((payload, _), sig, nextPk, eSig, sigVersion) = (payload, sig, nextPk, eSig, sigVersion)
       allBlocks = toSignedBlock <$> (authority :| blocks)
       blocksResult = verifyBlocks allBlocks pk
       proofResult = case toPossibleProofs proof of
@@ -550,13 +552,13 @@ parseBiscuitWith ParserConfig{..} bs =
 getRevocationIds :: Biscuit proof check -> NonEmpty ByteString
 getRevocationIds Biscuit{authority, blocks} =
   let allBlocks = authority :| blocks
-      getRevocationId (_, sig, _, _) = sigBytes sig
+      getRevocationId (_, sig, _, _, _) = sigBytes sig
    in getRevocationId <$> allBlocks
 
 -- | Generic version of 'authorizeBiscuitWithLimits' which takes custom 'Limits'.
 authorizeBiscuitWithLimits :: Limits -> Biscuit proof Verified -> Authorizer -> IO (Either ExecutionError (AuthorizedBiscuit proof))
 authorizeBiscuitWithLimits l biscuit@Biscuit{..} authorizer =
-  let toBlockWithRevocationId ((_, block), sig, _, eSig) = (block, sigBytes sig, snd <$> eSig)
+  let toBlockWithRevocationId ((_, block), sig, _, eSig, _) = (block, sigBytes sig, snd <$> eSig)
       -- the authority block can't be externally signed. If it carries a signature, it won't be
       -- verified. So we need to make sure there is none, to avoid having facts trusted without
       -- a proper signature check

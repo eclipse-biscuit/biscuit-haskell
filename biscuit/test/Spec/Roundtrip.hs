@@ -62,7 +62,7 @@ roundtrip' (s,p) i@(authority' :| blocks') = do
   final <- addBlocks blocks' init'
   let serialized = s final
       parsed = p pk serialized
-      getBlock ((_, b), _, _, _) = b
+      getBlock ((_, b), _, _, _, _) = b
       getBlocks b = getBlock <$> authority b :| blocks b
   getBlocks <$> parsed @?= Right (snd <$> i)
   rootKeyId <$> parsed @?= Right (Just 1)
@@ -91,7 +91,7 @@ roundtrip'' direct (s,p) i@(authority' :| blocks') = do
   final <- addBlocks blocks' init'
   let serialized = s final
       parsed = p pk serialized
-      getBlock ((_, b), _, _, _) = b
+      getBlock ((_, b), _, _, _, _) = b
       getBlocks b = getBlock <$> authority b :| blocks b
   getBlocks <$> parsed @?= Right (snd <$> i)
   rootKeyId <$> parsed @?= Right (Just 1)
@@ -113,7 +113,7 @@ multipleBlocks r = testCase "Multiple block" $ roundtrip r $
     |] :|
   [ [block|
       valid_date("file1") <- time($0), resource("file1"), $0 <= 2030-12-31T12:59:59+00:00;
-      valid_date($1) <- time($0), resource($1), $0 <= 1999-12-31T12:59:59+00:00, !["file1"].contains($1);
+      valid_date($1) <- time($0), resource($1), $0 <= 1999-12-31T12:59:59+00:00, !{"file1"}.contains($1);
       check if valid_date($0), resource($0);
     |]
   , [block|
@@ -127,25 +127,25 @@ multipleBlocks r = testCase "Multiple block" $ roundtrip r $
       check if 1 <= 1;
       check if 2 >= 1;
       check if 2 >= 2;
-      check if 3 == 3;
-      check if 1 + 2 * 3 - 4 / 2 == 5;
+      check if 3 === 3;
+      check if 1 + 2 * 3 - 4 / 2 === 5;
       check if "hello world".starts_with("hello") && "hello world".ends_with("world");
       check if "aaabde".matches("a*c?.e");
-      check if "abcD12" == "abcD12";
+      check if "abcD12" === "abcD12";
       check if 2019-12-04T09:46:41+00:00 < 2020-12-04T09:46:41+00:00;
       check if 2020-12-04T09:46:41+00:00 > 2019-12-04T09:46:41+00:00;
       check if 2019-12-04T09:46:41+00:00 <= 2020-12-04T09:46:41+00:00;
       check if 2020-12-04T09:46:41+00:00 >= 2020-12-04T09:46:41+00:00;
       check if 2020-12-04T09:46:41+00:00 >= 2019-12-04T09:46:41+00:00;
       check if 2020-12-04T09:46:41+00:00 >= 2020-12-04T09:46:41+00:00;
-      check if 2020-12-04T09:46:41+00:00 == 2020-12-04T09:46:41+00:00;
-      check if hex:12ab == hex:12ab;
-      check if [1, 2].contains(2);
-      check if [2019-12-04T09:46:41+00:00, 2020-12-04T09:46:41+00:00].contains(2020-12-04T09:46:41+00:00);
-      check if [false, true].contains(true);
-      check if ["abc", "def"].contains("abc");
-      check if [hex:12ab, hex:34de].contains(hex:34de);
-      check if ["hello", "world"].contains("hello");
+      check if 2020-12-04T09:46:41+00:00 === 2020-12-04T09:46:41+00:00;
+      check if hex:12ab === hex:12ab;
+      check if {1, 2}.contains(2);
+      check if {2019-12-04T09:46:41+00:00, 2020-12-04T09:46:41+00:00}.contains(2020-12-04T09:46:41+00:00);
+      check if {false, true}.contains(true);
+      check if {"abc", "def"}.contains("abc");
+      check if {hex:12ab, hex:34de}.contains(hex:34de);
+      check if {"hello", "world"}.contains("hello");
     |]
   , [block|
       check if

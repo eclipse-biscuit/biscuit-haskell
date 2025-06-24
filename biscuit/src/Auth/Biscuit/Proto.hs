@@ -29,13 +29,17 @@ module Auth.Biscuit.Proto
   , TermV2 (..)
   , ExpressionV2 (..)
   , TermSet (..)
+  , TermArray (..)
+  , TermMap (..)
+  , MapKey (..)
+  , MapEntry (..)
+  , Empty (..)
   , Op (..)
   , OpUnary (..)
   , UnaryKind (..)
   , OpBinary (..)
   , BinaryKind (..)
-  , OpTernary (..)
-  , TernaryKind (..)
+  , OpClosure (..)
   , ThirdPartyBlockContents (..)
   , ThirdPartyBlockRequest (..)
   , getField
@@ -83,6 +87,7 @@ data SignedBlock = SignedBlock
   , nextKey     :: Required 2 (Message PublicKey)
   , signature   :: Required 3 (Value ByteString)
   , externalSig :: Optional 4 (Message ExternalSig)
+  , version     :: Optional 5 (Value Int32)
   }
   deriving (Generic, Show)
   deriving anyclass (Decode, Encode)
@@ -134,8 +139,9 @@ data RuleV2 = RuleV2
     deriving anyclass (Decode, Encode)
 
 data CheckKind =
-    One
-  | All
+    CheckOne
+  | CheckAll
+  | Reject
   deriving stock (Show, Enum, Bounded)
 
 data CheckV2 = CheckV2
@@ -151,19 +157,48 @@ data PredicateV2 = PredicateV2
     deriving anyclass (Decode, Encode)
 
 data TermV2 =
-    TermVariable (Required 1 (Value Int64))
-  | TermInteger  (Required 2 (Value Int64))
-  | TermString   (Required 3 (Value Int64))
-  | TermDate     (Required 4 (Value Int64))
-  | TermBytes    (Required 5 (Value ByteString))
-  | TermBool     (Required 6 (Value Bool))
-  | TermTermSet  (Required 7 (Message TermSet))
+    TermVariable  (Required 1  (Value Int64))
+  | TermInteger   (Required 2  (Value Int64))
+  | TermString    (Required 3  (Value Int64))
+  | TermDate      (Required 4  (Value Int64))
+  | TermBytes     (Required 5  (Value ByteString))
+  | TermBool      (Required 6  (Value Bool))
+  | TermTermSet   (Required 7  (Message TermSet))
+  | TermNull      (Required 8  (Message Empty))
+  | TermTermArray (Required 9  (Message TermArray))
+  | TermTermMap   (Required 10 (Message TermMap))
+    deriving stock (Generic, Show)
+    deriving anyclass (Decode, Encode)
+
+data Empty = Empty {}
     deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
 
 newtype TermSet = TermSet
   { set :: Repeated 1 (Message TermV2)
+  } deriving stock (Generic, Show)
+    deriving anyclass (Decode, Encode)
+
+newtype TermArray = TermArray
+  { array :: Repeated 1 (Message TermV2)
+  } deriving stock (Generic, Show)
+    deriving anyclass (Decode, Encode)
+
+data MapKey =
+    MapKeyInt    (Required 1 (Value Int64))
+  | MapKeyString (Required 2 (Value Int64))
+    deriving stock (Generic, Show)
+    deriving anyclass (Decode, Encode)
+
+data MapEntry = MapEntry
+  { key   ::   Required 1 (Message MapKey)
+  , value :: Required 2 (Message TermV2)
+  } deriving stock (Generic, Show)
+    deriving anyclass (Decode, Encode)
+
+newtype TermMap = TermMap
+  { map :: Repeated 1 (Message MapEntry)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -176,14 +211,16 @@ data Op =
     OpVValue  (Required 1 (Message TermV2))
   | OpVUnary  (Required 2 (Message OpUnary))
   | OpVBinary (Required 3 (Message OpBinary))
+  | OpVClosure (Required 4 (Message OpClosure))
     deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
-data UnaryKind = Negate | Parens | Length
+data UnaryKind = Negate | Parens | Length | TypeOf | UnaryFfi
   deriving stock (Show, Enum, Bounded)
 
-newtype OpUnary = OpUnary
-  { kind :: Required 1 (Enumeration UnaryKind)
+data OpUnary = OpUnary
+  { kind    :: Required 1 (Enumeration UnaryKind)
+  , ffiName :: Optional 2 (Value Int64)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -209,19 +246,26 @@ data BinaryKind =
   | BitwiseOr
   | BitwiseXor
   | NotEqual
+  | HeterogeneousEqual
+  | HeterogeneousNotEqual
+  | LazyAnd
+  | LazyOr
+  | All
+  | Any
+  | Get
+  | BinaryFfi
+  | Try
   deriving stock (Show, Enum, Bounded)
 
-newtype OpBinary = OpBinary
-  { kind :: Required 1 (Enumeration BinaryKind)
+data OpBinary = OpBinary
+  { kind    :: Required 1 (Enumeration BinaryKind)
+  , ffiName :: Optional 2 (Value Int64)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
-data TernaryKind =
-    VerifyEd25519Signature
-  deriving stock (Show, Enum, Bounded)
-
-newtype OpTernary = OpTernary
-  { kind :: Required 1 (Enumeration TernaryKind)
+data OpClosure = OpClosure
+  { params :: Repeated 1 (Value Int64)
+  , ops    :: Repeated 2 (Message Op)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -253,8 +297,9 @@ decodeThirdPartyBlockContents = runGet decodeMessage
 
 data ThirdPartyBlockRequest
   = ThirdPartyBlockRequest
-  { previousPk :: Required 1 (Message PublicKey)
-  , pkTable    :: Repeated 2 (Message PublicKey)
+  { legacyPk :: Optional 1 (Message PublicKey)
+  , pkTable  :: Repeated 2 (Message PublicKey)
+  , prevSig  :: Required 3 (Value ByteString)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 

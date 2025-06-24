@@ -30,7 +30,7 @@ creation = do
   let authority = [block|
        // this is a comment
        right("file1", {allowedOperations});
-       check if source_ip($source_ip), ["127.0.0.1", {networkLocal}].contains($source_ip);
+       check if source_ip($source_ip), {"127.0.0.1", {networkLocal}}.contains($source_ip);
        |]
   biscuit <- mkBiscuit privateKey' authority
   let block1 = [block|check if time($time), $time < 2025-05-08T00:00:00Z;|]

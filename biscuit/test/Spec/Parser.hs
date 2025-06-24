@@ -71,6 +71,7 @@ parseBlock = runWithNoParams blockParser $ substituteBlock mempty mempty
 specs :: TestTree
 specs = testGroup "datalog parser"
   [ factWithDate
+  , factWithNull
   , simpleFact
   , oneLetterFact
   , simpleRule
@@ -113,7 +114,7 @@ termsGroupQQ = testGroup "Parse terms (in a QQ setting)"
      [ testCase "Variable name" $ parseTermQQ "{toto2_'}" @?= Right (Antiquote "toto2_'")
      , testCase "Leading underscore" $ parseTermQQ "{_toto}" @?= Right (Antiquote "_toto")
      , testCase "`_` is reserved" $ parseTermQQ "{_}" @?= Left "1:3:\n  |\n1 | {_}\n  |   ^\nunexpected '}'\nexpecting letter\n"
-     , testCase "Variables are lower-cased" $ parseTermQQ "{Toto}" @?= Left "1:2:\n  |\n1 | {Toto}\n  |  ^\nunexpected 'T'\nexpecting '_' or lowercase letter\n"
+     , testCase "Variables are lower-cased" $ parseTermQQ "{Toto}" @?= Left "1:2:\n  |\n1 | {Toto}\n  |  ^^^^^\nunexpected \"Toto}\"\nexpecting '_', lowercase letter, map (eg. {\"key\": 1}), or set (eg. {1,2,3})\n"
      , testCase "_ is lower-case" $ parseTermQQ "{_Toto}" @?= Right (Antiquote "_Toto")
      , testCase "unicode is allowed" $ parseTermQQ "{éllo}" @?= Right (Antiquote "éllo")
      ]
@@ -137,6 +138,11 @@ factWithDate = testCase "Parse fact containing a date" $ do
     Right (Predicate "date" [LDate $ read "2019-12-02 13:49:53.001 UTC"])
   parsePredicate "date(2019-12-02T13:49:53+00:00)" @?=
     Right (Predicate "date" [LDate $ read "2019-12-02 13:49:53 UTC"])
+
+factWithNull :: TestTree
+factWithNull = testCase "Parse fact containing a null value" $ do
+  parsePredicate "date(null)" @?=
+    Right (Predicate "date" [LNull])
 
 simpleRule :: TestTree
 simpleRule = testCase "Parse simple rule" $
@@ -211,14 +217,26 @@ constraints = testGroup "Parse expressions"
                  (EValue (LInteger 1234))
                  )
   , testCase "int comparison (EQ)" $
-      parseExpression "$0 == 1" @?=
+      parseExpression "$0 === 1" @?=
         Right (EBinary Equal
                  (EValue (Variable "0"))
                  (EValue (LInteger 1))
                  )
   , testCase "int comparison (NEQ)" $
-      parseExpression "$0 != 1" @?=
+      parseExpression "$0 !== 1" @?=
         Right (EBinary NotEqual
+                 (EValue (Variable "0"))
+                 (EValue (LInteger 1))
+                 )
+  , testCase "int comparison (HEQ)" $
+      parseExpression "$0 == 1" @?=
+        Right (EBinary HeterogeneousEqual
+                 (EValue (Variable "0"))
+                 (EValue (LInteger 1))
+                 )
+  , testCase "int comparison (HNEQ)" $
+      parseExpression "$0 != 1" @?=
+        Right (EBinary HeterogeneousNotEqual
                  (EValue (Variable "0"))
                  (EValue (LInteger 1))
                  )
@@ -229,13 +247,13 @@ constraints = testGroup "Parse expressions"
                  (EValue (LInteger (-1234)))
                  )
   , testCase "string comparison" $
-      parseExpression "$0 == \"abc\"" @?=
+      parseExpression "$0 === \"abc\"" @?=
         Right (EBinary Equal
                  (EValue (Variable "0"))
                  (EValue (LString "abc"))
                  )
   , testCase "string comparison (NEQ)" $
-      parseExpression "$0 != \"abc\"" @?=
+      parseExpression "$0 !== \"abc\"" @?=
         Right (EBinary NotEqual
                  (EValue (Variable "0"))
                  (EValue (LString "abc"))
@@ -259,33 +277,38 @@ constraints = testGroup "Parse expressions"
                  (EValue (LString "abc"))
                  )
   , testCase "int set operation" $
-      parseExpression "[1, 2].contains($0)" @?=
+      parseExpression "{1, 2}.contains($0)" @?=
         Right (EBinary Contains
                  (EValue (TermSet $ Set.fromList [LInteger 1, LInteger 2]))
                  (EValue (Variable "0"))
                  )
   , testCase "negated int set operation" $
-      parseExpression "![1, 2].contains($0)" @?=
+      parseExpression "!{1, 2}.contains($0)" @?=
         Right (EUnary Negate
                  (EBinary Contains
                     (EValue (TermSet $ Set.fromList [LInteger 1, LInteger 2]))
                     (EValue (Variable "0"))
                     ))
   , testCase "string set operation" $
-      parseExpression "[\"abc\", \"def\"].contains($0)" @?=
+      parseExpression "{\"abc\", \"def\"}.contains($0)" @?=
         Right (EBinary Contains
                  (EValue (TermSet $ Set.fromList [LString "abc", LString "def"]))
                  (EValue (Variable "0"))
                  )
   , testCase "negated string set operation" $
-      parseExpression "![\"abc\", \"def\"].contains($0)" @?=
+      parseExpression "!{\"abc\", \"def\"}.contains($0)" @?=
         Right (EUnary Negate
                  (EBinary Contains
                     (EValue (TermSet $ Set.fromList [LString "abc", LString "def"]))
                     (EValue (Variable "0"))
                     ))
+  , testCase "empty set operation" $
+      parseExpression "{,}.length()" @?=
+        Right (EUnary Length
+                (EValue (TermSet $ Set.fromList []))
+                )
   , testCase "arithmetic operation that looks like the beginning of a RFC3339 date" $
-      parseExpression "2022-12-10==2000" @?=
+      parseExpression "2022-12-10===2000" @?=
         Right (EBinary Equal
                  (EBinary Sub
                     (EBinary Sub
@@ -297,7 +320,7 @@ constraints = testGroup "Parse expressions"
                  (EValue $ LInteger 2000)
               )
   , testCase "chained method calls" $
-      parseExpression "$var.intersection([1]).union([2]).length()" @?=
+      parseExpression "$var.intersection({1}).union({2}).length()" @?=
         Right (EUnary Length
                  (EBinary Union
                     ( EBinary Intersection
@@ -306,6 +329,41 @@ constraints = testGroup "Parse expressions"
                     )
                     (EValue $ TermSet [LInteger 2])
                  )
+              )
+  , testCase "unary extern method call" $
+      parseExpression "$var.extern::test() == true" @?=
+        Right (EBinary HeterogeneousEqual
+                (EUnary (UnaryFfi "test") (EValue $ Variable "var"))
+                (EValue $ LBool True))
+  , testCase "binary extern method call" $
+      parseExpression "$var.extern::test(1) == true" @?=
+        Right (EBinary HeterogeneousEqual
+                (EBinary
+                  (BinaryFfi "test")
+                  (EValue $ Variable "var")
+                  (EValue $ LInteger 1))
+                  (EValue $ LBool True))
+  , testCase "nullary closures" $
+      parseExpression "true || 1 === 2" @?=
+        Right (EBinary LazyOr
+                (EValue $ LBool True)
+                  (EClosure []
+                      (EBinary Equal
+                          (EValue $ LInteger 1)
+                          (EValue $ LInteger 2)
+                      )
+                  )
+              )
+  , testCase "unary closures" $
+      parseExpression "{1}.all($p -> $p === 1)" @?=
+        Right (EBinary All
+                (EValue . TermSet . Set.singleton $ LInteger 1)
+                (EClosure ["p"]
+                    (EBinary Equal
+                      (EValue $ Variable "p")
+                      (EValue $ LInteger 1)
+                    )
+                )
               )
   , operatorPrecedences
   ]
@@ -323,18 +381,20 @@ operatorPrecedences = testGroup "mixed-precedence operators"
               )
   , testCase "< && starts_with" $
       parseExpression " 2 < $test && $var2.starts_with(\"test\") && true " @?=
-        Right (EBinary And
-                 (EBinary And
+        Right (EBinary LazyAnd
+                 (EBinary LazyAnd
                     (EBinary LessThan
                        (EValue $ LInteger 2)
                        (EValue $ Variable "test")
                     )
-                    (EBinary Prefix
-                       (EValue $ Variable "var2")
-                       (EValue $ LString "test")
+                    (EClosure []
+                      (EBinary Prefix
+                        (EValue $ Variable "var2")
+                        (EValue $ LString "test")
+                      )
                     )
                  )
-                 (EValue $ LBool True)
+                 (EClosure [] (EValue $ LBool True))
               )
   , testCase "+ *" $
       parseExpression "1 + 2 * 3" @?=
@@ -410,18 +470,24 @@ checkParsing = testGroup "check blocks"
       parseCheck "check if true" @?=
         Right Check
           { cQueries = [QueryItem [] [EValue $ LBool True] []]
-          , cKind = One
+          , cKind = CheckOne
           }
   , testCase "Simple check all" $
       parseCheck "check all true" @?=
         Right Check
           { cQueries = [QueryItem [] [EValue $ LBool True] []]
-          , cKind = All
+          , cKind = CheckAll
+          }
+  , testCase "Simple reject if" $
+      parseCheck "reject if true" @?=
+        Right Check
+          { cQueries = [QueryItem [] [EValue $ LBool True] []]
+          , cKind = Reject
           }
   , testCase "Multiple groups" $
       parseCheck
-        "check if fact($var), $var == true or \
-        \other($var), $var == 2" @?=
+        "check if fact($var), $var === true or \
+        \other($var), $var === 2" @?=
           Right Check
             { cQueries =
                 [ QueryItem [Predicate "fact" [Variable "var"]]
@@ -431,12 +497,12 @@ checkParsing = testGroup "check blocks"
                             [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
                             []
                 ]
-            , cKind = One
+            , cKind = CheckOne
             }
   , testCase "Multiple check all groups" $
       parseCheck
-        "check all fact($var), $var == true or \
-        \other($var), $var == 2" @?=
+        "check all fact($var), $var === true or \
+        \other($var), $var === 2" @?=
           Right Check
             { cQueries =
                 [ QueryItem [Predicate "fact" [Variable "var"]]
@@ -446,12 +512,27 @@ checkParsing = testGroup "check blocks"
                             [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
                             []
                 ]
-            , cKind = All
+            , cKind = CheckAll
+            }
+  , testCase "Multiple reject if groups" $
+      parseCheck
+        "reject if fact($var), $var === true or \
+        \other($var), $var === 2" @?=
+          Right Check
+            { cQueries =
+                [ QueryItem [Predicate "fact" [Variable "var"]]
+                            [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
+                            []
+                , QueryItem [Predicate "other" [Variable "var"]]
+                            [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
+                            []
+                ]
+            , cKind = Reject
             }
   , testCase "Multiple groups, scoped" $
       parseCheck
-        "check if fact($var), $var == true trusting previous or \
-        \other($var), $var == 2 trusting authority" @?=
+        "check if fact($var), $var === true trusting previous or \
+        \other($var), $var === 2 trusting authority" @?=
           Right Check
             { cQueries =
                 [ QueryItem [Predicate "fact" [Variable "var"]]
@@ -461,12 +542,12 @@ checkParsing = testGroup "check blocks"
                             [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
                             [OnlyAuthority]
                 ]
-            , cKind = One
+            , cKind = CheckOne
             }
   , testCase "Multiple check all groups, scoped" $
       parseCheck
-        "check all fact($var), $var == true trusting previous or \
-        \other($var), $var == 2 trusting authority" @?=
+        "check all fact($var), $var === true trusting previous or \
+        \other($var), $var === 2 trusting authority" @?=
           Right Check
             { cQueries =
                 [ QueryItem [Predicate "fact" [Variable "var"]]
@@ -476,7 +557,7 @@ checkParsing = testGroup "check blocks"
                             [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
                             [OnlyAuthority]
                 ]
-            , cKind = All
+            , cKind = CheckAll
             }
   ]
 
@@ -490,8 +571,8 @@ policyParsing = testGroup "policy blocks"
         Right (Deny, [QueryItem [] [EValue $ LBool True] []])
   , testCase "Allow with multiple groups" $
       parsePolicy
-        "allow if fact($var), $var == true or \
-        \other($var), $var == 2" @?=
+        "allow if fact($var), $var === true or \
+        \other($var), $var === 2" @?=
           Right
             ( Allow
             , [ QueryItem [Predicate "fact" [Variable "var"]]
@@ -504,8 +585,8 @@ policyParsing = testGroup "policy blocks"
             )
   , testCase "Deny with multiple groups" $
       parsePolicy
-        "deny if fact($var), $var == true or \
-        \other($var), $var == 2" @?=
+        "deny if fact($var), $var === true or \
+        \other($var), $var === 2" @?=
           Right
             ( Deny
             , [ QueryItem [Predicate "fact" [Variable "var"]]
@@ -519,8 +600,8 @@ policyParsing = testGroup "policy blocks"
   , testCase "Deny with multiple groups, multiline" $
       parsePolicy
         "deny if\n\
-           \fact($var), $var == true or //comment\n\
-           \other($var), $var == 2" @?=
+           \fact($var), $var === true or //comment\n\
+           \other($var), $var === 2" @?=
           Right
             ( Deny
             , [ QueryItem [Predicate "fact" [Variable "var"]]
@@ -533,8 +614,8 @@ policyParsing = testGroup "policy blocks"
             )
   , testCase "Allow with multiple groups, scoped" $
       parsePolicy
-        "allow if fact($var), $var == true trusting authority or \
-        \other($var), $var == 2 trusting ed25519/a1b712761c609039f878edad694d762652f1548a68acccc96735b3196a240e8b,ed25519/083aae4ba29a9a3781cdee7a800f4f8ab90591f65ca983fc429687628311aedd,ed25519/c6864578bc03596d52878bd70025ec966c95c60727cb6573198453e82132510d " @?=
+        "allow if fact($var), $var === true trusting authority or \
+        \other($var), $var === 2 trusting ed25519/a1b712761c609039f878edad694d762652f1548a68acccc96735b3196a240e8b,ed25519/083aae4ba29a9a3781cdee7a800f4f8ab90591f65ca983fc429687628311aedd,ed25519/c6864578bc03596d52878bd70025ec966c95c60727cb6573198453e82132510d " @?=
           Right
             ( Allow
             , [ QueryItem [Predicate "fact" [Variable "var"]]
@@ -596,7 +677,7 @@ authorizerParsing = testGroup "Simple authorizers"
             \  user($user_id),\n\
             \  member($user_id, $team_id),\n\
             \  team_role($team_id, $blog_id, \"contributor\"),\n\
-            \  [\"read\", \"write\"].contains($operation);\n\
+            \  {\"read\", \"write\"}.contains($operation);\n\
             \// unauthenticated users have read access on published articles\n\
             \allow if\n\
             \  operation(\"read\"),\n\
@@ -685,7 +766,7 @@ blockParsing = testCase "Full block" $ do
         \  user($user_id),\n\
         \  member($user_id, $team_id),\n\
         \  team_role($team_id, $blog_id, \"contributor\"),\n\
-        \  [\"read\", \"write\"].contains($operation);\n\
+        \  {\"read\", \"write\"}.contains($operation);\n\
         \ "
       p = Predicate
       sRead = LString "read"

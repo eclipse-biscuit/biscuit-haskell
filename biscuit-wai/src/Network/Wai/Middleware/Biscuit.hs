@@ -33,6 +33,7 @@ module Network.Wai.Middleware.Biscuit
   -- * Helpers
   , defaultExtractToken
   , defaultHandleError
+  , BiscuitError (..)
   ) where
 
 import           Auth.Biscuit       (AuthorizedBiscuit, Authorizer, Biscuit,

@@ -130,9 +130,9 @@ pbToBlock ePk PB.Block{..} = do
       bVersion = PB.getField version
   lift $ do
     let s = symbolsForCurrentBlock
-    bFacts <- traverse (pbToFact s) $ PB.getField facts_v2
-    bRules <- traverse (pbToRule s) $ PB.getField rules_v2
-    bChecks <- traverse (pbToCheck s) $ PB.getField checks_v2
+    bFacts <- traverse (pbToFact s) $ PB.getField facts
+    bRules <- traverse (pbToRule s) $ PB.getField rules
+    bChecks <- traverse (pbToCheck s) $ PB.getField checks
     bScope <- Set.fromList <$> traverse (pbToScope s) (PB.getField scope)
     let v6Plus = or
           [ any isReject bChecks
@@ -190,37 +190,37 @@ blockToPb hasExternalPk existingSymbols b@Block{..} =
         ]
       bSymbols = buildSymbolTable existingSymbols b
       s = reverseSymbols $ addFromBlock existingSymbols bSymbols
-      symbols   = PB.putField $ getSymbolList bSymbols
-      context   = PB.putField bContext
-      facts_v2  = PB.putField $ factToPb s <$> bFacts
-      rules_v2  = PB.putField $ ruleToPb s <$> bRules
-      checks_v2 = PB.putField $ checkToPb s <$> bChecks
-      scope     = PB.putField $ scopeToPb s <$> Set.toList bScope
-      pksTable   = PB.putField $ publicKeyToPb <$> getPkList bSymbols
-      version   =  if | v6Plus    -> 6
-                      | v5Plus    -> 5
-                      | v4Plus    -> 4
-                      | otherwise -> 3
+      symbols  = PB.putField $ getSymbolList bSymbols
+      context  = PB.putField bContext
+      facts    = PB.putField $ factToPb s <$> bFacts
+      rules    = PB.putField $ ruleToPb s <$> bRules
+      checks   = PB.putField $ checkToPb s <$> bChecks
+      scope    = PB.putField $ scopeToPb s <$> Set.toList bScope
+      pksTable = PB.putField $ publicKeyToPb <$> getPkList bSymbols
+      version  =  if | v6Plus    -> 6
+                     | v5Plus    -> 5
+                     | v4Plus    -> 4
+                     | otherwise -> 3
    in ((bSymbols, version), PB.Block {version = PB.putField $ Just $ fromIntegral version, ..})
 
-pbToFact :: Symbols -> PB.FactV2 -> Either String Fact
-pbToFact s PB.FactV2{predicate} = do
+pbToFact :: Symbols -> PB.Fact -> Either String Fact
+pbToFact s PB.Fact{predicate} = do
   let pbName  = PB.getField $ PB.name  $ PB.getField predicate
       pbTerms = PB.getField $ PB.terms $ PB.getField predicate
   name <- getSymbol s $ SymbolRef pbName
   terms <- traverse (pbToValue s) pbTerms
   pure Predicate{..}
 
-factToPb :: ReverseSymbols -> Fact -> PB.FactV2
+factToPb :: ReverseSymbols -> Fact -> PB.Fact
 factToPb s Predicate{..} =
   let
-      predicate = PB.PredicateV2
+      predicate = PB.Predicate
         { name  = PB.putField $ getSymbolRef $ getSymbolCode s name
         , terms = PB.putField $ valueToPb s <$> terms
         }
-   in PB.FactV2{predicate = PB.putField predicate}
+   in PB.Fact{predicate = PB.putField predicate}
 
-pbToRule :: Symbols -> PB.RuleV2 -> Either String Rule
+pbToRule :: Symbols -> PB.Rule -> Either String Rule
 pbToRule s pbRule = do
   let pbHead = PB.getField $ PB.head pbRule
       pbBody = PB.getField $ PB.body pbRule
@@ -234,17 +234,17 @@ pbToRule s pbRule = do
     Failure vs -> Left $ "Unbound variables in rule: " <> T.unpack (T.intercalate ", " $ NE.toList vs)
     Success r  -> pure r
 
-ruleToPb :: ReverseSymbols -> Rule -> PB.RuleV2
+ruleToPb :: ReverseSymbols -> Rule -> PB.Rule
 ruleToPb s Rule{..} =
-  PB.RuleV2
+  PB.Rule
     { head = PB.putField $ predicateToPb s rhead
     , body = PB.putField $ predicateToPb s <$> body
     , expressions = PB.putField $ expressionToPb s <$> expressions
     , scope = PB.putField $ scopeToPb s <$> Set.toList scope
     }
 
-pbToCheck :: Symbols -> PB.CheckV2 -> Either String Check
-pbToCheck s PB.CheckV2{queries,kind} = do
+pbToCheck :: Symbols -> PB.Check -> Either String Check
+pbToCheck s PB.Check{queries,kind} = do
   let toCheck Rule{body,expressions,scope} = QueryItem{qBody = body, qExpressions = expressions, qScope = scope}
   rules <- traverse (pbToRule s) $ PB.getField queries
   let cQueries = toCheck <$> rules
@@ -255,7 +255,7 @@ pbToCheck s PB.CheckV2{queries,kind} = do
         Nothing          -> CheckOne
   pure Check{..}
 
-checkToPb :: ReverseSymbols -> Check -> PB.CheckV2
+checkToPb :: ReverseSymbols -> Check -> PB.Check
 checkToPb s Check{..} =
   let dummyHead = Predicate "query" []
       toQuery QueryItem{..} =
@@ -268,7 +268,7 @@ checkToPb s Check{..} =
         CheckOne -> Nothing
         CheckAll -> Just PB.CheckAll
         Reject   -> Just PB.Reject
-   in PB.CheckV2 { queries = PB.putField $ toQuery <$> cQueries
+   in PB.Check { queries = PB.putField $ toQuery <$> cQueries
                  , kind = PB.putField pbKind
                  }
 
@@ -286,7 +286,7 @@ scopeToPb s = \case
   Previous      -> PB.ScType $ PB.putField PB.ScopePrevious
   BlockId pk    -> PB.ScBlock $ PB.putField $ getPublicKeyCode s pk
 
-pbToPredicate :: Symbols -> PB.PredicateV2 -> Either String (Predicate' 'InPredicate 'Representation)
+pbToPredicate :: Symbols -> PB.Predicate -> Either String (Predicate' 'InPredicate 'Representation)
 pbToPredicate s pbPredicate = do
   let pbName  = PB.getField $ PB.name  pbPredicate
       pbTerms = PB.getField $ PB.terms pbPredicate
@@ -294,9 +294,9 @@ pbToPredicate s pbPredicate = do
   terms <- traverse (pbToTerm s) pbTerms
   pure Predicate{..}
 
-predicateToPb :: ReverseSymbols -> Predicate -> PB.PredicateV2
+predicateToPb :: ReverseSymbols -> Predicate -> PB.Predicate
 predicateToPb s Predicate{..} =
-  PB.PredicateV2
+  PB.Predicate
     { name  = PB.putField $ getSymbolRef $ getSymbolCode s name
     , terms = PB.putField $ termToPb s <$> terms
     }
@@ -304,7 +304,7 @@ predicateToPb s Predicate{..} =
 pbTimeToUtcTime :: Int64 -> UTCTime
 pbTimeToUtcTime = posixSecondsToUTCTime . fromIntegral
 
-pbToTerm :: Symbols -> PB.TermV2 -> Either String Term
+pbToTerm :: Symbols -> PB.Term -> Either String Term
 pbToTerm s = \case
   PB.TermInteger  f -> pure $ LInteger $ fromIntegral $ PB.getField f
   PB.TermString   f ->        LString <$> getSymbol s (SymbolRef $ PB.getField f)
@@ -317,7 +317,7 @@ pbToTerm s = \case
   PB.TermTermMap f -> TermMap . Map.fromList <$> traverse (pbToMapEntry s) (PB.getField . PB.map $ PB.getField f)
   PB.TermNull     _ -> pure LNull
 
-termToPb :: ReverseSymbols -> Term -> PB.TermV2
+termToPb :: ReverseSymbols -> Term -> PB.Term
 termToPb s = \case
   Variable n -> PB.TermVariable $ PB.putField $ getSymbolRef $ getSymbolCode s n
   LInteger v -> PB.TermInteger  $ PB.putField $ fromIntegral v
@@ -348,7 +348,7 @@ pbToMapEntry s PB.MapEntry{key,value} = do
   v <- pbToValue s $ PB.getField value
   pure (k, v)
 
-pbToValue :: Symbols -> PB.TermV2 -> Either String Value
+pbToValue :: Symbols -> PB.Term -> Either String Value
 pbToValue s = \case
   PB.TermInteger  f -> pure $ LInteger $ fromIntegral $ PB.getField f
   PB.TermString   f ->        LString <$> getSymbol s (SymbolRef $ PB.getField f)
@@ -361,7 +361,7 @@ pbToValue s = \case
   PB.TermTermMap f -> TermMap . Map.fromList <$> traverse (pbToMapEntry s) (PB.getField . PB.map $ PB.getField f)
   PB.TermNull     _ -> pure LNull
 
-valueToPb :: ReverseSymbols -> Value -> PB.TermV2
+valueToPb :: ReverseSymbols -> Value -> PB.Term
 valueToPb s = \case
   LInteger v -> PB.TermInteger $ PB.putField $ fromIntegral v
   LString  v -> PB.TermString  $ PB.putField $ getSymbolRef $ getSymbolCode s v
@@ -376,7 +376,7 @@ valueToPb s = \case
   Variable v  -> absurd v
   Antiquote v -> absurd v
 
-pbToSetValue :: Symbols -> PB.TermV2 -> Either String (Term' 'WithinSet 'InFact 'Representation)
+pbToSetValue :: Symbols -> PB.Term -> Either String (Term' 'WithinSet 'InFact 'Representation)
 pbToSetValue s = \case
   PB.TermInteger  f -> pure $ LInteger $ fromIntegral $ PB.getField f
   PB.TermString   f ->        LString  <$> getSymbol s (SymbolRef $ PB.getField f)
@@ -389,7 +389,7 @@ pbToSetValue s = \case
   PB.TermTermArray _ -> Left "Arrays can’t appear in sets"
   PB.TermTermMap _ -> Left "Maps can’t appear in sets"
 
-setValueToPb :: ReverseSymbols -> Term' 'WithinSet 'InFact 'Representation -> PB.TermV2
+setValueToPb :: ReverseSymbols -> Term' 'WithinSet 'InFact 'Representation -> PB.Term
 setValueToPb s = \case
   LInteger v  -> PB.TermInteger $ PB.putField $ fromIntegral v
   LString  v  -> PB.TermString  $ PB.putField $ getSymbolRef $ getSymbolCode s v
@@ -404,15 +404,15 @@ setValueToPb s = \case
   Variable  v -> absurd v
   Antiquote v -> absurd v
 
-pbToExpression :: Symbols -> PB.ExpressionV2 -> Either String Expression
-pbToExpression s PB.ExpressionV2{ops} = do
+pbToExpression :: Symbols -> PB.Expression -> Either String Expression
+pbToExpression s PB.Expression{ops} = do
   parsedOps <- traverse (pbToOp s) $ PB.getField ops
   fromStack parsedOps
 
-expressionToPb :: ReverseSymbols -> Expression -> PB.ExpressionV2
+expressionToPb :: ReverseSymbols -> Expression -> PB.Expression
 expressionToPb s e =
   let ops = opToPb s <$> toStack e
-   in PB.ExpressionV2 { ops = PB.putField ops }
+   in PB.Expression { ops = PB.putField ops }
 
 pbToOp :: Symbols -> PB.Op -> Either String Op
 pbToOp s = \case
@@ -482,7 +482,7 @@ pbToBinary s PB.OpBinary{kind, ffiName} =
         PB.All                   -> Right All
         PB.Any                   -> Right Any
         PB.Get                   -> Right Get
-        PB.Try                   -> Right Try
+        PB.TryOr                 -> Right Try
         PB.BinaryFfi -> do
           nameIdx <- maybeToRight "Missing extern call name" $ PB.getField ffiName
           name' <- getSymbol s $ SymbolRef nameIdx
@@ -530,7 +530,7 @@ binaryToPb s = \case
   Any -> PB.OpBinary { kind = PB.putField PB.Any, ffiName = PB.putField Nothing }
   All -> PB.OpBinary { kind = PB.putField PB.All, ffiName = PB.putField Nothing }
   Get -> PB.OpBinary { kind = PB.putField PB.Get, ffiName = PB.putField Nothing }
-  Try -> PB.OpBinary { kind = PB.putField PB.Try, ffiName = PB.putField Nothing }
+  Try -> PB.OpBinary { kind = PB.putField PB.TryOr, ffiName = PB.putField Nothing }
   BinaryFfi n -> PB.OpBinary
     { kind = PB.putField PB.BinaryFfi
     , ffiName = PB.putField . Just . getSymbolRef $ getSymbolCode s n

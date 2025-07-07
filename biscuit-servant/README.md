@@ -6,7 +6,7 @@
 
 ## Usage
 
-```Haskell
+```haskell
 type AppM = WithAuthorizer Handler
 type API = RequireBiscuit :> ProtectedAPI
 

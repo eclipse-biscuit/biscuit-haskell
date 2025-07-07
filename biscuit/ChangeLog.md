@@ -1,5 +1,12 @@
 # Changelog for biscuit-haskell
 
+## 0.5.0.0 (not released yet)
+
+- biscuit v3.3 support
+- drop support for GHC <9.6
+- support for GHC 9.6, 9.8, 9.10, 9.12
+- dependencies update (including removal of cryptonite in favor of crypton)
+
 ## 0.4.0.0
 
 - abort authorization on evaluation error as mandated by the spec

@@ -96,7 +96,6 @@ test-suite biscuit-haskell-test
     , bytestring
     , cereal
     , containers
-    , cryptonite
     , lens
     , lens-aeson
     , megaparsec

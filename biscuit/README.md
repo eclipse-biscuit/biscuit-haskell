@@ -6,7 +6,9 @@ Main library for biscuit tokens support, providing minting and signature verific
 
 ## Supported biscuit versions
 
-The core library supports [`v2` biscuits][v2spec] (both open and sealed).
+The core library supports [`v3.0` to `v3.3` biscuits][spec] (both open and sealed).
+
+Only `ed25519` signatures are supported. `p256r1` signatures are not supported yet.
 
 ## How to use this library
 
@@ -103,7 +105,7 @@ creation = do
 [gcouprie]: https://github.com/geal
 [biscuit]: https://www.clever-cloud.com/blog/engineering/2021/04/12/introduction-to-biscuit/
 [biscuittutorial]: https://www.clever-cloud.com/blog/engineering/2021/04/15/biscuit-tutorial/
-[v2spec]: https://github.com/CleverCloud/biscuit/blob/2.0/SPECIFICATIONS.md
+[spec]: https://github.com/eclipse-biscuit/biscuit/blob/main/SPECIFICATIONS.md
 [quasiquotes]: https://wiki.haskell.org/Quasiquotation
-[biscuitexample]: https://github.com/biscuit-auth/biscuit-haskell/blob/main/biscuit/src/Auth/Biscuit/Example.hs
-[packagedoc]: https://hackage.haskell.org/package/biscuit-haskell-0.1.0.0/docs/Auth-Biscuit.html
+[biscuitexample]: https://github.com/eclipse-biscuit/biscuit-haskell/blob/main/biscuit/src/Auth/Biscuit/Example.hs
+[packagedoc]: https://hackage.haskell.org/package/biscuit-haskell-0.4.0.0/docs/Auth-Biscuit.html

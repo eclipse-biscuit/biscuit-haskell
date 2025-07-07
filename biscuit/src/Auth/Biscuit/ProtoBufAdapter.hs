@@ -429,15 +429,19 @@ opToPb s = \case
   COp p os -> PB.OpVClosure $ PB.putField $ closureToPb s p os
 
 pbToUnary :: Symbols -> PB.OpUnary -> Either String Unary
-pbToUnary s PB.OpUnary{kind,ffiName} = case PB.getField kind of
-  PB.Negate -> Right Negate
-  PB.Parens -> Right Parens
-  PB.Length -> Right Length
-  PB.TypeOf -> Right TypeOf
-  PB.UnaryFfi -> do
-    nameIdx <- maybeToRight "Missing extern call name" $ PB.getField ffiName
-    name' <- getSymbol s $ SymbolRef nameIdx
-    pure $ UnaryFfi name'
+pbToUnary s PB.OpUnary{kind,ffiName} =
+  let noFfi = case PB.getField ffiName of
+                Just _  -> const $ Left "FFI named set on a regular operation "
+                Nothing -> Right
+   in case PB.getField kind of
+        PB.Negate -> noFfi Negate
+        PB.Parens -> noFfi Parens
+        PB.Length -> noFfi Length
+        PB.TypeOf -> noFfi TypeOf
+        PB.UnaryFfi -> do
+          nameIdx <- maybeToRight "Missing extern call name" $ PB.getField ffiName
+          name' <- getSymbol s $ SymbolRef nameIdx
+          pure $ UnaryFfi name'
 
 unaryToPb :: ReverseSymbols -> Unary -> PB.OpUnary
 unaryToPb s = \case
@@ -453,36 +457,39 @@ unaryToPb s = \case
 
 pbToBinary :: Symbols -> PB.OpBinary -> Either String Binary
 pbToBinary s PB.OpBinary{kind, ffiName} =
-  case PB.getField kind of
-        PB.LessThan              -> Right LessThan
-        PB.GreaterThan           -> Right GreaterThan
-        PB.LessOrEqual           -> Right LessOrEqual
-        PB.GreaterOrEqual        -> Right GreaterOrEqual
-        PB.Equal                 -> Right Equal
-        PB.Contains              -> Right Contains
-        PB.Prefix                -> Right Prefix
-        PB.Suffix                -> Right Suffix
-        PB.Regex                 -> Right Regex
-        PB.Add                   -> Right Add
-        PB.Sub                   -> Right Sub
-        PB.Mul                   -> Right Mul
-        PB.Div                   -> Right Div
-        PB.And                   -> Right And
-        PB.Or                    -> Right Or
-        PB.Intersection          -> Right Intersection
-        PB.Union                 -> Right Union
-        PB.BitwiseAnd            -> Right BitwiseAnd
-        PB.BitwiseOr             -> Right BitwiseOr
-        PB.BitwiseXor            -> Right BitwiseXor
-        PB.NotEqual              -> Right NotEqual
-        PB.HeterogeneousEqual    -> Right HeterogeneousEqual
-        PB.HeterogeneousNotEqual -> Right HeterogeneousNotEqual
-        PB.LazyAnd               -> Right LazyAnd
-        PB.LazyOr                -> Right LazyOr
-        PB.All                   -> Right All
-        PB.Any                   -> Right Any
-        PB.Get                   -> Right Get
-        PB.TryOr                 -> Right Try
+  let noFfi = case PB.getField ffiName of
+                Just _  -> const $ Left "FFI named set on a regular operation "
+                Nothing -> Right
+   in case PB.getField kind of
+        PB.LessThan              -> noFfi LessThan
+        PB.GreaterThan           -> noFfi GreaterThan
+        PB.LessOrEqual           -> noFfi LessOrEqual
+        PB.GreaterOrEqual        -> noFfi GreaterOrEqual
+        PB.Equal                 -> noFfi Equal
+        PB.Contains              -> noFfi Contains
+        PB.Prefix                -> noFfi Prefix
+        PB.Suffix                -> noFfi Suffix
+        PB.Regex                 -> noFfi Regex
+        PB.Add                   -> noFfi Add
+        PB.Sub                   -> noFfi Sub
+        PB.Mul                   -> noFfi Mul
+        PB.Div                   -> noFfi Div
+        PB.And                   -> noFfi And
+        PB.Or                    -> noFfi Or
+        PB.Intersection          -> noFfi Intersection
+        PB.Union                 -> noFfi Union
+        PB.BitwiseAnd            -> noFfi BitwiseAnd
+        PB.BitwiseOr             -> noFfi BitwiseOr
+        PB.BitwiseXor            -> noFfi BitwiseXor
+        PB.NotEqual              -> noFfi NotEqual
+        PB.HeterogeneousEqual    -> noFfi HeterogeneousEqual
+        PB.HeterogeneousNotEqual -> noFfi HeterogeneousNotEqual
+        PB.LazyAnd               -> noFfi LazyAnd
+        PB.LazyOr                -> noFfi LazyOr
+        PB.All                   -> noFfi All
+        PB.Any                   -> noFfi Any
+        PB.Get                   -> noFfi Get
+        PB.TryOr                 -> noFfi Try
         PB.BinaryFfi -> do
           nameIdx <- maybeToRight "Missing extern call name" $ PB.getField ffiName
           name' <- getSymbol s $ SymbolRef nameIdx

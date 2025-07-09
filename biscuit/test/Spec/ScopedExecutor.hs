@@ -11,8 +11,8 @@ import           Control.Arrow                       ((&&&))
 import           Data.Either                         (isRight)
 import           Data.Map.Strict                     as Map
 import           Data.Set                            as Set
-import           Data.Text                           (Text, unpack)
-import           Test.Tasty
+import           Data.Text                           (Text, pack, unpack)
+import           Test.Tasty                          hiding (Timeout)
 import           Test.Tasty.HUnit
 
 import           Auth.Biscuit                        (addBlock, addSignedBlock,
@@ -29,6 +29,7 @@ import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
 import           Auth.Biscuit.Datalog.Parser         (authorizer, block, check,
                                                       query, run)
 import           Auth.Biscuit.Datalog.ScopedExecutor
+import           Auth.Biscuit.Timer                  (timerIO)
 
 specs :: TestTree
 specs = testGroup "Block-scoped Datalog Evaluation"
@@ -44,6 +45,7 @@ specs = testGroup "Block-scoped Datalog Evaluation"
   , revocationIdsAreInjected
   , authorizerFactsAreQueried
   , biscuitFactsAreQueried
+  , evaluationReachesTimeout
   ]
 
 authorizerOnlySeesAuthority :: TestTree
@@ -334,3 +336,13 @@ biscuitFactsAreQueried = testGroup "Biscuit can be queried"
             ]
       user @?= Right expected
   ]
+
+evaluationReachesTimeout :: TestTree
+evaluationReachesTimeout = testCase "Timeout is reached while runnning authorization" $ do
+    let limits = defaultLimits { maxTime = 10 }
+        input = pack $ Prelude.take 1000 $ repeat 'a'
+        regex = pack $ "^" <> Prelude.take 1000 (cycle "a?") <> Prelude.take 1000 (repeat 'a') <> "$"
+        authority = [block|fact(true);rule($t) <- fact($t), {input}.matches({regex});|]
+        auth = [authorizer|allow if rule(true);|]
+    res <- runAuthorizerWithTimer timerIO limits (authority, "", Nothing) [] auth
+    res @?= Left Timeout

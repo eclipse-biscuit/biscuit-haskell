@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleInstances  #-}
 {-# LANGUAGE KindSignatures     #-}
 {-# LANGUAGE NamedFieldPuns     #-}
+{-# LANGUAGE RankNTypes         #-}
 {-# LANGUAGE RecordWildCards    #-}
 {- HLINT ignore "Reduce duplication" -}
 {-|
@@ -92,7 +93,7 @@ import           Auth.Biscuit.Datalog.ScopedExecutor (AuthorizationSuccess,
                                                       collectWorld,
                                                       queryAvailableFacts,
                                                       queryGeneratedFacts,
-                                                      runAuthorizerWithLimits)
+                                                      runAuthorizerWithTimer)
 import qualified Auth.Biscuit.Proto                  as PB
 import           Auth.Biscuit.ProtoBufAdapter        (blockToPb, pbToBlock,
                                                       pbToProof,
@@ -103,6 +104,7 @@ import           Auth.Biscuit.ProtoBufAdapter        (blockToPb, pbToBlock,
                                                       thirdPartyBlockContentsToPb,
                                                       thirdPartyBlockRequestToPb)
 import           Auth.Biscuit.Symbols
+import           Auth.Biscuit.Timer                  (timerIO)
 
 -- | Protobuf serialization does not have a guaranteed deterministic behaviour,
 -- so we need to keep the initial serialized payload around in order to compute
@@ -555,9 +557,10 @@ getRevocationIds Biscuit{authority, blocks} =
       getRevocationId (_, sig, _, _, _) = sigBytes sig
    in getRevocationId <$> allBlocks
 
--- | Generic version of 'authorizeBiscuitWithLimits' which takes custom 'Limits'.
-authorizeBiscuitWithLimits :: Limits -> Biscuit proof Verified -> Authorizer -> IO (Either ExecutionError (AuthorizedBiscuit proof))
-authorizeBiscuitWithLimits l biscuit@Biscuit{..} authorizer =
+authorizeBiscuitWithTimer :: Functor f =>
+    (forall a. Int -> a -> f (Maybe a)) ->
+    Limits -> Biscuit proof Verified -> Authorizer -> f (Either ExecutionError (AuthorizedBiscuit proof))
+authorizeBiscuitWithTimer timer l biscuit@Biscuit{..} authorizer =
   let toBlockWithRevocationId ((_, block), sig, _, eSig, _) = (block, sigBytes sig, snd <$> eSig)
       -- the authority block can't be externally signed. If it carries a signature, it won't be
       -- verified. So we need to make sure there is none, to avoid having facts trusted without
@@ -569,10 +572,15 @@ authorizeBiscuitWithLimits l biscuit@Biscuit{..} authorizer =
           , authorizationSuccess
           }
    in fmap withBiscuit <$>
-        runAuthorizerWithLimits l
+        runAuthorizerWithTimer timer l
           (dropExternalPk $ toBlockWithRevocationId authority)
           (toBlockWithRevocationId <$> blocks)
           authorizer
+
+-- | Generic version of 'authorizeBiscuitWithLimits' which takes custom 'Limits'.
+authorizeBiscuitWithLimits :: Limits -> Biscuit proof Verified -> Authorizer -> IO (Either ExecutionError (AuthorizedBiscuit proof))
+authorizeBiscuitWithLimits =
+  authorizeBiscuitWithTimer timerIO
 
 -- | Given a biscuit with a verified signature and an authorizer (a set of facts, rules, checks
 -- and policies), verify a biscuit:

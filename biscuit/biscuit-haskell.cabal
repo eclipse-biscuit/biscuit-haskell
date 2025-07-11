@@ -1,4 +1,4 @@
-cabal-version: 2.0
+cabal-version: 3.0
 
 name:           biscuit-haskell
 version:        0.4.0.0
@@ -10,7 +10,7 @@ bug-reports:    https://github.com/biscuit-auth/biscuit-haskell/issues
 author:         Clément Delafargue
 maintainer:     clement@delafargue.name
 copyright:      2021 Clément Delafargue
-license:        BSD3
+license:        BSD-3-Clause
 license-file:   LICENSE
 build-type:     Simple
 tested-with:    GHC ==9.6.7 || ==9.8.4 || ==9.10.2 || ==9.12.2

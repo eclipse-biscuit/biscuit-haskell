@@ -31,7 +31,7 @@ The purpose of the ECA is to provide a written record that you have agreed to pr
 
 In order to sign the ECA, you can follow these steps:
 
-- [Create an account](https://dev.eclipse.org/site_login/createaccount.php) on dev.eclipse.org
-- Open your [Account Settings tab](https://dev.eclipse.org/site_login/myaccount.php#open_tab_accountsettings), enter your GitHub ID and click Update Account
-- Read and [sign the ECA](https://dev.eclipse.org/site_login/myaccount.php#open_tab_cla)
+- [Create an account](https://accounts.eclipse.org/user/register) on dev.eclipse.org
+- Go to `Edit Profile`, then `Link GitHub Account`, then enter your GitHub ID and click Update Account
+- Read and [sign the ECA](https://accounts.eclipse.org/user/eca)
 - Use the exact same email address for your Eclipse account and your commit author.

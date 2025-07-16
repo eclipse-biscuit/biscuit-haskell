@@ -6,6 +6,7 @@
 {-# LANGUAGE NamedFieldPuns             #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE QuasiQuotes                #-}
+{-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE RecordWildCards            #-}
 {-# LANGUAGE TupleSections              #-}
 {-|
@@ -17,8 +18,7 @@
 -}
 module Auth.Biscuit.Datalog.ScopedExecutor
   ( BlockWithRevocationId
-  , runAuthorizer
-  , runAuthorizerWithLimits
+  , runAuthorizerWithTimer
   , runAuthorizerNoTimeout
   , runFactGeneration
   , PureExecError (..)
@@ -44,6 +44,7 @@ import qualified Data.List.NonEmpty            as NE
 import           Data.Map                      (Map)
 import qualified Data.Map                      as Map
 import           Data.Map.Strict               ((!?))
+import           Data.Maybe                    (fromMaybe)
 import           Data.Set                      (Set)
 import qualified Data.Set                      as Set
 import           Data.Text                     (Text)
@@ -57,13 +58,11 @@ import           Auth.Biscuit.Datalog.Executor (Bindings, ExecutionError (..),
                                                 MatchedQuery (..),
                                                 ResultError (..), Scoped,
                                                 checkCheck, checkPolicy,
-                                                countFacts, defaultLimits,
-                                                fromScopedFacts,
+                                                countFacts, fromScopedFacts,
                                                 getBindingsForRuleBody,
                                                 getFactsForRule,
                                                 keepAuthorized', toScopedFacts)
 import           Auth.Biscuit.Datalog.Parser   (fact)
-import           Auth.Biscuit.Timer            (timer)
 import           Auth.Biscuit.Utils            (foldMapM, mapMaybeM)
 import           Data.Bitraversable            (bisequence)
 
@@ -94,35 +93,22 @@ data AuthorizationSuccess
 getBindings :: AuthorizationSuccess -> Set Bindings
 getBindings AuthorizationSuccess{matchedAllowQuery=MatchedQuery{bindings}} = bindings
 
--- | Given a series of blocks and an authorizer, ensure that all
--- the checks and policies match
-runAuthorizer :: BlockWithRevocationId
-            -- ^ The authority block
-            -> [BlockWithRevocationId]
-            -- ^ The extra blocks
-            -> Authorizer
-            -- ^ A authorizer
-            -> IO (Either ExecutionError AuthorizationSuccess)
-runAuthorizer = runAuthorizerWithLimits defaultLimits
 
--- | Given a series of blocks and an authorizer, ensure that all
--- the checks and policies match, with provided execution
--- constraints
-runAuthorizerWithLimits :: Limits
-                      -- ^ custom limits
-                      -> BlockWithRevocationId
-                      -- ^ The authority block
-                      -> [BlockWithRevocationId]
-                      -- ^ The extra blocks
-                      -> Authorizer
-                      -- ^ A authorizer
-                      -> IO (Either ExecutionError AuthorizationSuccess)
-runAuthorizerWithLimits l@Limits{..} authority blocks v = do
-  resultOrTimeout <- timer maxTime $ pure $ runAuthorizerNoTimeout l authority blocks v
-  pure $ case resultOrTimeout of
-    Nothing -> Left Timeout
-    Just r  -> r
 
+runAuthorizerWithTimer :: Functor f
+                       => (forall a. Int -> a -> f (Maybe a))
+                       -- ^ time making sure evaluation does not last longer than the provided amount of microseconds
+                       -> Limits
+                       -- ^ custom limits
+                       -> BlockWithRevocationId
+                       -- ^ The authority block
+                       -> [BlockWithRevocationId]
+                       -- ^ The extra blocks
+                       -> Authorizer
+                       -- ^ An authorizer
+                       -> f (Either ExecutionError AuthorizationSuccess)
+runAuthorizerWithTimer timer l@Limits{maxTime} authority blocks v =
+   fromMaybe (Left Timeout) <$> timer maxTime (runAuthorizerNoTimeout l authority blocks v)
 
 mkRevocationIdFacts :: BlockWithRevocationId -> [BlockWithRevocationId]
                     -> Set Fact

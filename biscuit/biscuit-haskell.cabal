@@ -1,7 +1,7 @@
 cabal-version: 3.0
 
 name:           biscuit-haskell
-version:        0.4.0.0
+version:        0.5.0.0
 category:       Security
 synopsis:       Library support for the Biscuit security token
 description:    Please see the README on GitHub at <https://github.com/biscuit-auth/biscuit-haskell#readme>

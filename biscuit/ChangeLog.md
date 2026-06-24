@@ -1,5 +1,11 @@
 # Changelog for biscuit-haskell
 
+## 0.5.0.0
+
+- support for biscuit 3.3
+- switch to crypton
+- dependency updates
+
 ## 0.4.0.0
 
 - abort authorization on evaluation error as mandated by the spec

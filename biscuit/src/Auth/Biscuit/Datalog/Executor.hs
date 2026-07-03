@@ -527,7 +527,7 @@ evalBinary _ Intersection _ _ = Left "Only sets support `.intersection()`"
 evalBinary _ Union (TermSet t) (TermSet t') = pure $ TermSet (Set.union t t')
 evalBinary _ Union _ _ = Left "Only sets support `.union()`"
 evalBinary _ Get (TermArray t) (LInteger i) = pure $
-  if i < List.genericLength t
+  if i < List.genericLength t && i >= 0
   then List.genericIndex t i
   else LNull
 evalBinary _ Get (TermMap t) (LInteger i) = pure . fromMaybe LNull $ t !? IntKey i

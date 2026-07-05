@@ -2109,6 +2109,49 @@ World {
 ```
 
 result: `Err(FailedLogic(Unauthorized { policy: Allow(0), checks: [Block(FailedBlockCheck { block_id: 0, check_id: 0, rule: "check all operation($op), allowed_operations($allowed), $allowed.contains($op)" })] }))`
+### validation for "no matches"
+
+authorizer code:
+```
+allow if true;
+```
+
+revocation ids:
+- `c456817012e1d523c6d145b6d6a3475d9f7dd4383c535454ff3f745ecf4234984ce09b9dec0551f3d783abe850f826ce43b12f1fd91999a4753a56ecf4c56d0d`
+
+authorizer world:
+```
+World {
+  facts: [
+    Facts {
+        origin: {
+            Some(
+                0,
+            ),
+        },
+        facts: [
+            "allowed_operations({\"A\", \"B\"})",
+        ],
+    },
+]
+  rules: []
+  checks: [
+    Checks {
+        origin: Some(
+            0,
+        ),
+        checks: [
+            "check all operation($op), allowed_operations($allowed), $allowed.contains($op)",
+        ],
+    },
+]
+  policies: [
+    "allow if true",
+]
+}
+```
+
+result: `Err(FailedLogic(Unauthorized { policy: Allow(0), checks: [Block(FailedBlockCheck { block_id: 0, check_id: 0, rule: "check all operation($op), allowed_operations($allowed), $allowed.contains($op)" })] }))`
 
 
 ------------------------------
@@ -2417,6 +2460,7 @@ public keys: []
 block version: 4
 
 ```
+check if true !== false;
 check if 1 !== 3;
 check if 1 | 2 ^ 3 === 0;
 check if "abcD12x" !== "abcD12";
@@ -2433,7 +2477,7 @@ allow if true;
 ```
 
 revocation ids:
-- `117fa653744c859561555e6a6f5990e3a8e7817f91b87aa6991b6d64297158b4e884c92d10f49f74c96069df722aa676839b72751ca9d1fe83a7025b591de00b`
+- `9402c07923aa33bc911de80e61f388f5c4533e6b36e45317dc1db1e6bcc7664ed0c1c504d0ca8925208008961d95bbdbc36f6e3d91b3173369cc19ed625e9a0c`
 
 authorizer world:
 ```
@@ -2451,6 +2495,7 @@ World {
             "check if 1 | 2 ^ 3 === 0",
             "check if 2022-12-04T09:46:41Z !== 2020-12-04T09:46:41Z",
             "check if hex:12abcd !== hex:12ab",
+            "check if true !== false",
             "check if {1, 4} !== {1, 2}",
         ],
     },
@@ -3011,7 +3056,7 @@ result: `Ok(0)`
 
 authorizer code:
 ```
-allow if [true].any($p -> [true].all($p -> $p));
+allow if {"true"}.any($p -> {"true"}.all($p -> $p));
 ```
 
 revocation ids:
@@ -3042,7 +3087,7 @@ World {
     },
 ]
   policies: [
-    "allow if [true].any($p -> [true].all($p -> $p))",
+    "allow if {\"true\"}.any($p -> {\"true\"}.all($p -> $p))",
 ]
 }
 ```
@@ -3182,6 +3227,7 @@ check if [1, 2, 3].starts_with([1, 2]);
 check if [4, 5, 6].ends_with([6]);
 check if [1, 2, "a"].get(2) == "a";
 check if [1, 2].get(3) == null;
+check if [1, 2].get(-1) == null;
 check if [1, 2, 3].all($p -> $p > 0);
 check if [1, 2, 3].any($p -> $p > 2);
 check if {"a": 1, "b": 2, "c": 3, "d": 4}.length() == 4;
@@ -3208,7 +3254,7 @@ allow if true;
 ```
 
 revocation ids:
-- `b22238a06ca9c015d3c49d4ebaa7e8ab6e0d69119b3264033618e726d62fc6f4757a7bebc25f255444aba39994554a62a53ecc13b68802efab8da85ace62390d`
+- `0227fc29d6bf85cc52503f497b0b232235ffe5192c68933388136eae3fc3419229e9489b85d1bb57525554edac7cda87c984c96639bfb4171acc499312ffe30e`
 
 authorizer world:
 ```
@@ -3233,6 +3279,7 @@ World {
             "check if [1, 2, 3].any($p -> $p > 2)",
             "check if [1, 2, 3].starts_with([1, 2])",
             "check if [1, 2].get(3) == null",
+            "check if [1, 2].get(-1) == null",
             "check if [4, 5, 6].ends_with([6])",
             "check if {\"a\": 1, \"b\": 2, \"c\": 3, \"d\": 4}.contains(\"d\")",
             "check if {\"a\": 1, \"b\": 2, \"c\": 3, \"d\": 4}.length() == 4",

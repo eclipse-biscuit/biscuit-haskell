@@ -32,6 +32,7 @@ module Auth.Biscuit.Datalog.ScopedExecutor
   , collectWorld
   ) where
 
+import           Control.Exception             (evaluate)
 import           Control.Monad                 (unless, when)
 import           Control.Monad.State           (StateT (..), evalStateT, get,
                                                 gets, lift, put)
@@ -118,7 +119,7 @@ runAuthorizerWithLimits :: Limits
                       -- ^ A authorizer
                       -> IO (Either ExecutionError AuthorizationSuccess)
 runAuthorizerWithLimits l@Limits{..} authority blocks v = do
-  resultOrTimeout <- timer maxTime $ pure $ runAuthorizerNoTimeout l authority blocks v
+  resultOrTimeout <- timer maxTime $ evaluate $ runAuthorizerNoTimeout l authority blocks v
   pure $ case resultOrTimeout of
     Nothing -> Left Timeout
     Just r  -> r
@@ -167,7 +168,12 @@ runAuthorizerNoTimeout :: Limits
                        -> BlockWithRevocationId
                        -> [BlockWithRevocationId]
                        -> Authorizer
-                       -> Either ExecutionError AuthorizationSuccess
+                       -> -- NB: The return type here requires all checks and policies to be checked before
+                          -- the value can be forced to WHNF (we can only decide between Left _ and Right _
+                          -- based on the result of these checks). The implementation of the maxTime limit
+                          -- depends on this property, if this type changes the property will need to be
+                          -- preserved or the maxTime limit respected some other way
+                          Either ExecutionError AuthorizationSuccess
 runAuthorizerNoTimeout limits authority blocks authorizer = do
   let fst' (a,_,_) = a
       trd' (_,_,c) = c

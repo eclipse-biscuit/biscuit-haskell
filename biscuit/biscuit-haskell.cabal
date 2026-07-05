@@ -104,7 +104,6 @@ test-suite biscuit-haskell-test
     , protobuf
     , random
     , tasty
-    , tasty-expected-failure
     , tasty-hunit
     , template-haskell
     , text

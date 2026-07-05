@@ -15,7 +15,6 @@ import           Data.Set                            as Set
 import           Data.Text                           (Text, unpack)
 import           System.IO.Unsafe                    (unsafePerformIO)
 import           Test.Tasty                   hiding (Timeout)
-import           Test.Tasty.ExpectedFailure
 import           Test.Tasty.HUnit
 
 import           Auth.Biscuit                        (addBlock, addSignedBlock,
@@ -230,7 +229,7 @@ maxFactsCountWorks = testCase "ScopedExecutions stops when hitting the facts thr
   runAuthorizerNoTimeout limits (authority, "", Nothing) [(block1, "", Nothing)] verif @?= Left TooManyFacts
 
 maxTimeWorks :: TestTree
-maxTimeWorks = expectFail $ testCase "ScopedExecutions stops when hitting the timeout" $ do
+maxTimeWorks = testCase "ScopedExecutions stops when hitting the timeout" $ do
   lateBoolVar <- newEmptyMVar
   let slowBool _ _ = unsafePerformIO $ Right <$> takeMVar lateBoolVar
       limits = withExternFunc "foo" slowBool $ defaultLimits { maxTime = 1 }

@@ -8,11 +8,14 @@
 module Spec.ScopedExecutor (specs) where
 
 import           Control.Arrow                       ((&&&))
+import           Control.Concurrent.MVar              (newEmptyMVar, takeMVar, putMVar)
 import           Data.Either                         (isRight)
 import           Data.Map.Strict                     as Map
 import           Data.Set                            as Set
 import           Data.Text                           (Text, unpack)
-import           Test.Tasty
+import           System.IO.Unsafe                    (unsafePerformIO)
+import           Test.Tasty                   hiding (Timeout)
+import           Test.Tasty.ExpectedFailure
 import           Test.Tasty.HUnit
 
 import           Auth.Biscuit                        (addBlock, addSignedBlock,
@@ -25,7 +28,8 @@ import           Auth.Biscuit.Datalog.AST
 import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
                                                       Limits (..),
                                                       ResultError (..),
-                                                      defaultLimits)
+                                                      defaultLimits,
+                                                      withExternFunc)
 import           Auth.Biscuit.Datalog.Parser         (authorizer, block, check,
                                                       query, run)
 import           Auth.Biscuit.Datalog.ScopedExecutor
@@ -40,6 +44,7 @@ specs = testGroup "Block-scoped Datalog Evaluation"
   , thirdPartyBlocks
   , iterationCountWorks
   , maxFactsCountWorks
+  , maxTimeWorks
   , allChecksAreCollected
   , revocationIdsAreInjected
   , authorizerFactsAreQueried
@@ -223,6 +228,22 @@ maxFactsCountWorks = testCase "ScopedExecutions stops when hitting the facts thr
          allow if true;
        |]
   runAuthorizerNoTimeout limits (authority, "", Nothing) [(block1, "", Nothing)] verif @?= Left TooManyFacts
+
+maxTimeWorks :: TestTree
+maxTimeWorks = expectFail $ testCase "ScopedExecutions stops when hitting the timeout" $ do
+  lateBoolVar <- newEmptyMVar
+  let slowBool _ _ = unsafePerformIO $ Right <$> takeMVar lateBoolVar
+      limits = withExternFunc "foo" slowBool $ defaultLimits { maxTime = 1 }
+      authority =
+       [block|
+       |]
+      verif =
+       [authorizer|
+         allow if 1.extern::foo();
+       |]
+  res <- runAuthorizerWithLimits limits (authority, "", Nothing) [] verif
+  putMVar lateBoolVar $ LBool True
+  res @?= Left Timeout
 
 allChecksAreCollected :: TestTree
 allChecksAreCollected = testCase "ScopedExecutions collects all facts results even after a failure" $ do

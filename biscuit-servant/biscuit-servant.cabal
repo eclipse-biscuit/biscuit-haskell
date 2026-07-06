@@ -1,7 +1,7 @@
 cabal-version: 3.0
 
 name:           biscuit-servant
-version:        0.4.0.0
+version:        0.5.0.0
 category:       Security
 synopsis:       Servant support for the Biscuit security token
 description:    Please see the README on GitHub at <https://github.com/biscuit-auth/biscuit-haskell#readme>
@@ -34,7 +34,7 @@ library
   ghc-options: -Wall
   build-depends:
     base                 >= 4.7 && <5,
-    biscuit-haskell      >= 0.4 && < 0.5,
+    biscuit-haskell      >= 0.5 && < 0.6,
     bytestring           >= 0.10 && <0.13,
     mtl                  >= 2.2 && < 2.4,
     text                 >= 1.2 && <3,

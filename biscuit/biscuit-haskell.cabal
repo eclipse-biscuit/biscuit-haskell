@@ -1,7 +1,7 @@
 cabal-version: 2.0
 
 name:           biscuit-haskell
-version:        0.4.0.0
+version:        0.4.0.1
 category:       Security
 synopsis:       Library support for the Biscuit security token
 description:    Please see the README on GitHub at <https://github.com/biscuit-auth/biscuit-haskell#readme>
@@ -49,7 +49,7 @@ library
   build-depends:
     base                 >= 4.7 && <5,
     async                ^>= 2.2,
-    base16               >= 0.3 && <2.0,
+    base16               >= 0.3 && <2,
     bytestring           >= 0.10 && <0.12,
     text                 >= 1.2 && <3,
     containers           ^>= 0.6,
@@ -82,6 +82,8 @@ test-suite biscuit-haskell-test
       Spec.ScopedExecutor
       Spec.Verification
       Paths_biscuit_haskell
+  autogen-modules:
+      Paths_biscuit_haskell
   hs-source-dirs:
       test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
@@ -89,7 +91,7 @@ test-suite biscuit-haskell-test
       async
     , aeson
     , base >=4.7 && <5
-    , base16 >=0.3 && <2.0
+    , base16 >=0.3 && <2
     , base64
     , biscuit-haskell
     , bytestring

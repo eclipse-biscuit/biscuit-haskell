@@ -8,12 +8,20 @@ case "$CANDIDATE" in
   *) echo "Releasing candidate version"; CANDIDATE="";;
 esac
 
-echo -n "Release version> "
-read VERSION
+publish() {
+  PACKAGE="$1"
+  echo "Releasing ${PACKAGE}"
+  echo -n "Release version (leave blank to skip)> "
+  read PACKAGE_VERSION
+  if [ -z "$PACKAGE_VERSION" ]; then
+    echo "Skipping ${PACKAGE} (no version provided)"
+    return
+  fi
+  echo "Publishing ${PACKAGE}-${PACKAGE_VERSION}"
+  cabal upload -u clementd -P 'pass show hackage' "./dist-newstyle/sdist/${PACKAGE}-${PACKAGE_VERSION}.tar.gz" ${CANDIDATE}
+  cabal upload -u clementd -P 'pass show hackage' "./dist-newstyle/${PACKAGE}-${PACKAGE_VERSION}-docs.tar.gz" --documentation ${CANDIDATE}
+}
 
-cabal upload "./dist-newstyle/sdist/biscuit-haskell-${VERSION}.tar.gz" ${CANDIDATE}
-cabal upload "./dist-newstyle/biscuit-haskell-${VERSION}-docs.tar.gz" --documentation ${CANDIDATE}
-cabal upload "./dist-newstyle/sdist/biscuit-servant-${VERSION}.tar.gz" ${CANDIDATE}
-cabal upload "./dist-newstyle/biscuit-servant-${VERSION}-docs.tar.gz" --documentation ${CANDIDATE}
-# cabal upload -u clementd -P 'pass show hackage' "./dist-newstyle/sdist/biscuit-wai-${VERSION}.tar.gz" ${CANDIDATE}
-# cabal upload -u clementd -P 'pass show hackage' "./dist-newstyle/biscuit-wai-${VERSION}-docs.tar.gz" --documentation ${CANDIDATE}
+publish biscuit-haskell
+publish biscuit-servant
+publish biscuit-wai

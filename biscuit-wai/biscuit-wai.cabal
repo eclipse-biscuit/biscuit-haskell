@@ -13,7 +13,7 @@ copyright:      2021 Clément Delafargue
 license:        BSD-3-Clause
 license-file:   LICENSE
 build-type:     Simple
-tested-with:    GHC ==8.10.7 || == 9.0.2 || == 9.2.4
+tested-with:    GHC ==9.8.4 || ==9.10.3 || ==9.12.4 || ==9.14.1
 extra-source-files:
 
 source-repository head
@@ -32,7 +32,7 @@ library
   ghc-options: -Wall
   build-depends:
     base                 >= 4.7 && <5,
-    biscuit-haskell      >= 0.4 && < 0.5,
+    biscuit-haskell      >= 0.5 && < 0.6,
     bytestring           >= 0.10 && <0.13,
     http-types           ^>= 0.12,
     vault                ^>= 0.3,

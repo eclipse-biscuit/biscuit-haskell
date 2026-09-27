@@ -1,6 +1,6 @@
 # Changelog for biscuit-haskell
 
-## 0.5.0.0 (not released yet)
+## 0.5.0.0
 
 - biscuit v3.3 support
 - drop support for GHC <9.6

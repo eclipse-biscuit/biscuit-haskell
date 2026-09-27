@@ -36,3 +36,5 @@ Supported versions are:
 
 * biscuit-haskell 0.4.0.0
 * biscuit-servant 0.4.0.0
+# Security issues reporting
+

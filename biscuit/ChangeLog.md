@@ -1,5 +1,9 @@
 # Changelog for biscuit-haskell
 
+## 0.4.0.1
+
+- force datalog evaluation to WHNF when running the maxtime watchdog
+
 ## 0.4.0.0
 
 - abort authorization on evaluation error as mandated by the spec

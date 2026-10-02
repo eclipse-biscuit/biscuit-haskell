@@ -53,7 +53,7 @@ library
     bytestring           >= 0.10 && <0.13,
     text                 >= 1.2 && <3,
     containers           >= 0.6 && <0.9,
-    crypton              >= 1.1,
+    crypton              >= 1.1 && < 2,
     ram                  >= 0.20.1 && < 0.23,
     template-haskell     >= 2.16 && < 2.25,
     base64               ^>= 1.0,

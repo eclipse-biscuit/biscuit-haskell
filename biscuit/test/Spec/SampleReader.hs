@@ -310,7 +310,7 @@ processValidation step b (name, ValidationR{..}) = do
         | x == y = Right $ LString "equal strings"
         | otherwise = Right $ LString "different strings"
       testfn _ _ = Left "unsupported operands"
-  let limits = withExternFunc "test" testfn defaultLimits
+  let limits = withExternFunc "test" testfn $ defaultLimits { maxTime = 5000 }
   res <- authorizeBiscuitWithLimits limits b (authorizer <> pols)
   checkResult compareExecErrors result res
   let revocationIds = encodeHex <$> toList (getRevocationIds b)
